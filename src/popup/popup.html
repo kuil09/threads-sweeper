@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Threads Sweeper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧹 Threads Sweeper</h1>
+      <p class="subtitle">혐오 계정 차단 & 증거 수집</p>
+    </header>
+
+    <!-- 현재 상태 -->
+    <section id="status-section" class="section">
+      <div id="page-status" class="status-box">
+        <span class="status-indicator" id="status-indicator"></span>
+        <span id="status-text">페이지 확인 중...</span>
+      </div>
+    </section>
+
+    <!-- 현재 프로필 정보 -->
+    <section id="profile-section" class="section hidden">
+      <h2>대상 프로필</h2>
+      <div class="profile-card">
+        <div class="profile-info">
+          <span class="profile-name" id="profile-name">-</span>
+          <span class="profile-handle" id="profile-handle">-</span>
+        </div>
+        <div class="profile-stats">
+          <span id="follower-count">팔로워: -</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 작업 버튼 -->
+    <section id="actions-section" class="section hidden">
+      <h2>작업 선택</h2>
+
+      <button id="btn-block-followers" class="btn btn-danger">
+        <span class="btn-icon">🚫</span>
+        <span class="btn-text">팔로워 전체 차단</span>
+      </button>
+
+      <button id="btn-archive" class="btn btn-primary">
+        <span class="btn-icon">📸</span>
+        <span class="btn-text">증거 아카이빙</span>
+      </button>
+    </section>
+
+    <!-- 진행 상황 -->
+    <section id="progress-section" class="section hidden">
+      <h2>진행 상황</h2>
+      <div class="progress-container">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="progress-text">
+          <span id="progress-current">0</span> / <span id="progress-total">0</span>
+        </div>
+      </div>
+      <p id="progress-status" class="progress-status">준비 중...</p>
+      <button id="btn-cancel" class="btn btn-secondary">취소</button>
+    </section>
+
+    <!-- 아카이브 관리 -->
+    <section id="archive-section" class="section">
+      <h2>저장된 증거</h2>
+      <div id="archive-list" class="archive-list">
+        <p class="empty-text">저장된 증거가 없습니다</p>
+      </div>
+      <div class="archive-actions">
+        <button id="btn-export-pdf" class="btn btn-success" disabled>
+          <span class="btn-icon">📄</span>
+          <span class="btn-text">PDF 리포트 생성</span>
+        </button>
+        <button id="btn-clear-archive" class="btn btn-secondary" disabled>
+          <span class="btn-icon">🗑️</span>
+          <span class="btn-text">전체 삭제</span>
+        </button>
+      </div>
+    </section>
+
+    <footer>
+      <p>⚠️ 책임감 있게 사용하세요</p>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
