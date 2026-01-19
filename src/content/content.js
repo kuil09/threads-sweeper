@@ -1,5 +1,15 @@
-// Content Script for Threads.com
+// Content Script for Threads.com/Threads.net
 // Handles page interaction, scraping, and blocking
+// Extracts display name from titles like "Name (@handle)".
+// Titles without parentheses will fall back to other selectors.
+const PROFILE_TITLE_REGEX = /^(.*?)\s*\(@/;
+// Supports K/M/B and Korean units (천/만/억) in follower counts.
+const FOLLOWER_NUMBER_PATTERN = '\\d+(?:,\\d+)*(?:\\.\\d+)?(?:[KMB]|천|만|억)?';
+const FOLLOWER_COUNT_REGEX = new RegExp(`(${FOLLOWER_NUMBER_PATTERN})\\s*(?:followers|팔로워)`, 'i');
+const FOLLOWER_NUMBER_REGEX = new RegExp(`(${FOLLOWER_NUMBER_PATTERN})`, 'i');
+const PROFILE_HEADER_SELECTOR = '[data-testid*="profile"], [data-testid*="user-info"], [class*="ProfileHeader"], header, [role="main"]';
+const FOLLOWERS_LINK_SELECTOR = 'a[href$="/followers"], a[href$="/followers/"], a[href*="/followers?"], [data-testid*="followers"]';
+const FOLLOWERS_CONTAINER_SELECTOR = '[role="dialog"], [aria-modal="true"], [data-testid*="followers"], [class*="modal"], main, [role="main"]';
 
 class ThreadsSweeper {
   constructor() {
@@ -51,7 +61,7 @@ class ThreadsSweeper {
   checkCurrentProfile() {
     // Check if we're on a profile page
     const url = window.location.href;
-    const profileMatch = url.match(/threads\.com\/@([^/?]+)/);
+    const profileMatch = url.match(/threads\.(?:com|net)\/@([^/?]+)/);
 
     if (profileMatch) {
       this.currentUsername = profileMatch[1];
@@ -61,7 +71,7 @@ class ThreadsSweeper {
   async getProfileInfo() {
     try {
       const url = window.location.href;
-      const profileMatch = url.match(/threads\.com\/@([^/?]+)/);
+      const profileMatch = url.match(/threads\.(?:com|net)\/@([^/?]+)/);
 
       if (!profileMatch) {
         return null;
@@ -70,14 +80,14 @@ class ThreadsSweeper {
       const username = profileMatch[1];
 
       // Wait for profile elements to load
-      await this.waitForElement('[class*="ProfileHeader"], header');
+      await this.waitForElement(PROFILE_HEADER_SELECTOR);
 
       // Try to get profile info from the page
       const profile = {
         username: username,
         displayName: this.getDisplayName(),
         followerCount: this.getFollowerCount(),
-        profileUrl: `https://www.threads.com/@${username}`,
+        profileUrl: `${window.location.origin}/@${username}`,
         bio: this.getBio()
       };
 
@@ -90,8 +100,23 @@ class ThreadsSweeper {
   }
 
   getDisplayName() {
+    const titleName = this.extractDisplayNameFromTitle(document.title);
+    if (titleName) {
+      return titleName;
+    }
+
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.content;
+    if (ogTitle) {
+      const ogName = this.extractDisplayNameFromTitle(ogTitle);
+      return (ogName || ogTitle).trim();
+    }
+
     // Try multiple selectors for display name
     const selectors = [
+      'header h1',
+      '[data-testid="profile-name"]',
+      '[data-testid="user-name"]',
+      '[data-testid*="profile"] h1',
       'h1',
       '[class*="displayName"]',
       'header h2',
@@ -111,17 +136,32 @@ class ThreadsSweeper {
   getFollowerCount() {
     // Look for follower count in the page
     const text = document.body.innerText;
-    const followerMatch = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)\s*(?:followers|팔로워)/i);
+    const followerMatch = text.match(FOLLOWER_COUNT_REGEX);
 
     if (followerMatch) {
       return followerMatch[1];
+    }
+
+    const followerSelectors = [
+      '[data-testid*="followers"]',
+      'a[href$="/followers"]',
+      'a[href$="/followers/"]',
+      'a[href*="/followers?"]'
+    ];
+
+    for (const selector of followerSelectors) {
+      const element = document.querySelector(selector);
+      const match = element?.textContent?.match(FOLLOWER_NUMBER_REGEX);
+      if (match) {
+        return match[1];
+      }
     }
 
     // Try to find element with follower info
     const links = document.querySelectorAll('a[href*="followers"]');
     for (const link of links) {
       const text = link.textContent;
-      const match = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)/i);
+      const match = text.match(FOLLOWER_NUMBER_REGEX);
       if (match) {
         return match[1];
       }
@@ -131,8 +171,16 @@ class ThreadsSweeper {
   }
 
   getBio() {
+    const ogDescription = document.querySelector('meta[property="og:description"], meta[name="description"]')?.content;
+    if (ogDescription) {
+      return ogDescription.trim();
+    }
+
     // Try to get bio/description
     const bioSelectors = [
+      '[data-testid="profile-bio"]',
+      '[data-testid="user-bio"]',
+      '[data-testid*="bio"]',
       '[class*="bio"]',
       '[class*="description"]',
       'header + div span[dir="auto"]'
@@ -193,7 +241,7 @@ class ThreadsSweeper {
       this.sendProgress(0, totalFollowers || 0, '팔로워 목록 열기 중...');
 
       // Click on followers link
-      const followersLink = await this.waitForElement('a[href*="followers"]');
+      const followersLink = await this.waitForElement(FOLLOWERS_LINK_SELECTOR);
       if (!followersLink) {
         this.sendComplete(false, '팔로워 목록을 열 수 없습니다.');
         return;
@@ -235,7 +283,7 @@ class ThreadsSweeper {
     this.sendProgress(0, total, '팔로워 목록 스크롤 중...');
 
     // Find the scrollable container
-    const container = document.querySelector('[role="dialog"], [class*="modal"], main');
+    const container = document.querySelector(FOLLOWERS_CONTAINER_SELECTOR);
 
     let lastHeight = 0;
     let attempts = 0;
@@ -243,9 +291,13 @@ class ThreadsSweeper {
 
     while (attempts < maxAttempts) {
       // Get all follower items currently visible
-      const followerItems = document.querySelectorAll('[class*="UserListItem"], [data-pressable-container="true"] a[href^="/@"]');
+      const listRoot = container || document;
+      const followerItems = listRoot.querySelectorAll('a[href*="/@"]');
 
       for (const item of followerItems) {
+        if (!this.isProfileLink(item)) {
+          continue;
+        }
         if (this.shouldCancel) {
           return { cancelled: true, blocked, total: total || followers.size };
         }
@@ -259,7 +311,7 @@ class ThreadsSweeper {
         }
 
         followers.add(usernameMatch[1]);
-        const itemContainer = item.closest('[class*="UserListItem"], [data-pressable-container="true"]') || item;
+        const itemContainer = item.closest('[class*="UserListItem"], [data-pressable-container="true"], [role="listitem"], li') || item;
         const success = await this.blockUser({
           username: usernameMatch[1],
           profileUrl: link,
@@ -303,14 +355,16 @@ class ThreadsSweeper {
   async blockUser(follower) {
     try {
       // Find the user's element and look for the three-dot menu or block button
-      const userElement = follower.element || document.querySelector(`a[href="/@${follower.username}"]`);
+      const userElement = follower.element || document.querySelector(
+        `a[href="/@${follower.username}"], a[href="${window.location.origin}/@${follower.username}"]`
+      );
 
       if (!userElement) {
         return false;
       }
 
       // Find the parent container
-      const container = userElement.closest('[class*="UserListItem"], [data-pressable-container="true"]') || userElement;
+      const container = userElement.closest('[class*="UserListItem"], [data-pressable-container="true"], [role="listitem"], li') || userElement;
 
       if (!container) {
         return false;
@@ -321,21 +375,21 @@ class ThreadsSweeper {
       }
 
       // Look for menu button (three dots)
-      const menuButton = container.querySelector('[aria-label*="menu"], [aria-label*="More"], button[class*="more"]');
+      const menuButton = container.querySelector('[aria-label*="menu"], [aria-label*="More"], [aria-label*="Options"], [data-testid*="more"], [data-testid*="options"], button[class*="more"]');
 
       if (menuButton) {
         menuButton.click();
         await this.sleep(300);
 
         // Look for block option
-        const blockOption = this.findElementByText('[role="menuitem"], button', ['block', '차단']);
+        const blockOption = this.findElementByText('[role="menuitem"], [role="button"], button', ['block', '차단']);
 
         if (blockOption) {
           blockOption.click();
           await this.sleep(300);
 
           // Confirm block if needed
-          const confirmButton = this.findElementByText('button', ['block', '차단', 'confirm', '확인']);
+          const confirmButton = this.findElementByText('[role="button"], button', ['block', '차단', 'confirm', '확인']);
           if (confirmButton) {
             confirmButton.click();
           }
@@ -432,18 +486,18 @@ class ThreadsSweeper {
 
     while (attempts < maxAttempts && posts.length < 20) {
       // Find post elements
-      const postElements = document.querySelectorAll('article, [class*="PostItem"], [data-pressable-container="true"][class*="post"]');
+      const postElements = document.querySelectorAll('article, [role="article"], [data-testid*="post"], [data-testid*="thread"], [class*="PostItem"], [data-pressable-container="true"][class*="post"]');
 
       for (const postEl of postElements) {
         // Get post link
-        const postLink = postEl.querySelector('a[href*="/post/"]');
+        const postLink = postEl.querySelector('a[href*="/post/"], a[href*="/t/"]');
         const postUrl = postLink?.href;
 
         if (postUrl && !seen.has(postUrl)) {
           seen.add(postUrl);
 
           // Get post content
-          const contentEl = postEl.querySelector('[class*="text"], [dir="auto"]');
+          const contentEl = postEl.querySelector('[data-testid*="post-text"], [data-testid*="content"], [class*="text"], [dir="auto"]');
           const content = contentEl?.textContent || '';
 
           // Get post timestamp
@@ -590,6 +644,22 @@ class ThreadsSweeper {
     return rect.top >= 0 && rect.bottom <= viewportHeight;
   }
 
+  isProfileLink(link) {
+    // Threads posts use /post/ and /t/ paths, so exclude them from profile links.
+    if (!link?.pathname) {
+      return false;
+    }
+
+    const path = link.pathname;
+    return path.startsWith('/@') && !path.includes('/post/') && !path.includes('/t/');
+  }
+
+  extractDisplayNameFromTitle(title) {
+    if (!title) return null;
+    const match = title.match(PROFILE_TITLE_REGEX);
+    return match?.[1]?.trim() || null;
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -601,7 +671,7 @@ const sweeper = new ThreadsSweeper();
 // Add floating action button on Threads profile pages
 function addFloatingButton() {
   const url = window.location.href;
-  if (!url.match(/threads\.com\/@[^/]+$/)) return;
+  if (!url.match(/threads\.(?:com|net)\/@[^/]+$/)) return;
 
   const existingBtn = document.getElementById('threads-sweeper-fab');
   if (existingBtn) return;

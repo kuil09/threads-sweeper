@@ -11,7 +11,8 @@
     "downloads"
   ],
   "host_permissions": [
-    "https://www.threads.com/*"
+    "https://www.threads.com/*",
+    "https://www.threads.net/*"
   ],
   "action": {
     "default_popup": "src/popup/popup.html",
@@ -27,7 +28,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.threads.com/*"],
+      "matches": ["https://www.threads.com/*", "https://www.threads.net/*"],
       "js": ["src/content/content.js"],
       "css": ["src/content/content.css"]
     }
@@ -35,7 +36,7 @@
   "web_accessible_resources": [
     {
       "resources": ["src/lib/*"],
-      "matches": ["https://www.threads.com/*"]
+      "matches": ["https://www.threads.com/*", "https://www.threads.net/*"]
     }
   ],
   "icons": {
