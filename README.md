@@ -50,7 +50,7 @@ Threads에서 혐오 발언, 조롱, 극우 콘텐츠를 게시하는 계정들�
 ### 팔로워 차단하기
 
 1. Threads에서 차단하고자 하는 대상의 프로필 페이지로 이동합니다.
-   - 예: `https://www.threads.net/@username`
+   - 예: `https://www.threads.com/@username`
 
 2. 브라우저 툴바의 Threads Sweeper 아이콘을 클릭합니다.
 

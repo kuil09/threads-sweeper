@@ -1,4 +1,4 @@
-// Content Script for Threads.net
+// Content Script for Threads.com
 // Handles page interaction, scraping, and blocking
 
 class ThreadsSweeper {
@@ -51,7 +51,7 @@ class ThreadsSweeper {
   checkCurrentProfile() {
     // Check if we're on a profile page
     const url = window.location.href;
-    const profileMatch = url.match(/threads\.net\/@([^/?]+)/);
+    const profileMatch = url.match(/threads\.com\/@([^/?]+)/);
 
     if (profileMatch) {
       this.currentUsername = profileMatch[1];
@@ -61,7 +61,7 @@ class ThreadsSweeper {
   async getProfileInfo() {
     try {
       const url = window.location.href;
-      const profileMatch = url.match(/threads\.net\/@([^/?]+)/);
+      const profileMatch = url.match(/threads\.com\/@([^/?]+)/);
 
       if (!profileMatch) {
         return null;
@@ -77,7 +77,7 @@ class ThreadsSweeper {
         username: username,
         displayName: this.getDisplayName(),
         followerCount: this.getFollowerCount(),
-        profileUrl: `https://www.threads.net/@${username}`,
+        profileUrl: `https://www.threads.com/@${username}`,
         bio: this.getBio()
       };
 
@@ -111,7 +111,7 @@ class ThreadsSweeper {
   getFollowerCount() {
     // Look for follower count in the page
     const text = document.body.innerText;
-    const followerMatch = text.match(/(\d+(?:,\d+)*(?:\.\d+)?[KMB]?)\s*(?:followers|팔로워)/i);
+    const followerMatch = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)\s*(?:followers|팔로워)/i);
 
     if (followerMatch) {
       return followerMatch[1];
@@ -121,7 +121,7 @@ class ThreadsSweeper {
     const links = document.querySelectorAll('a[href*="followers"]');
     for (const link of links) {
       const text = link.textContent;
-      const match = text.match(/(\d+(?:,\d+)*(?:\.\d+)?[KMB]?)/);
+      const match = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)/i);
       if (match) {
         return match[1];
       }
@@ -183,53 +183,41 @@ class ThreadsSweeper {
     this.shouldCancel = false;
 
     try {
-      // Navigate to followers list
-      const followersUrl = `https://www.threads.net/@${this.currentProfile.username}/followers`;
-
-      this.sendProgress(0, 0, '팔로워 목록 열기 중...');
-
-      // Click on followers link or navigate
-      const followersLink = document.querySelector('a[href*="followers"]');
-      if (followersLink) {
-        followersLink.click();
-      } else {
-        window.location.href = followersUrl;
+      const profile = this.currentProfile || await this.getProfileInfo();
+      if (!profile) {
+        this.sendComplete(false, '프로필 정보를 가져올 수 없습니다.');
         return;
       }
+
+      const totalFollowers = this.parseFollowerCount(profile.followerCount);
+      this.sendProgress(0, totalFollowers || 0, '팔로워 목록 열기 중...');
+
+      // Click on followers link
+      const followersLink = await this.waitForElement('a[href*="followers"]');
+      if (!followersLink) {
+        this.sendComplete(false, '팔로워 목록을 열 수 없습니다.');
+        return;
+      }
+
+      followersLink.click();
 
       // Wait for followers modal/page to load
       await this.sleep(2000);
 
-      // Get followers list
-      const followers = await this.scrapeFollowersList();
+      // Block followers as they load
+      const result = await this.blockFollowersFromList(totalFollowers);
 
-      if (followers.length === 0) {
+      if (result.cancelled) {
+        this.sendComplete(false, `차단 취소됨 (${result.blocked}/${result.total} 완료)`);
+        return;
+      }
+
+      if (result.total === 0) {
         this.sendComplete(false, '팔로워를 찾을 수 없습니다.');
         return;
       }
 
-      this.sendProgress(0, followers.length, `${followers.length}명의 팔로워 차단 시작...`);
-
-      // Block each follower
-      let blocked = 0;
-      for (const follower of followers) {
-        if (this.shouldCancel) {
-          this.sendComplete(false, `차단 취소됨 (${blocked}/${followers.length} 완료)`);
-          return;
-        }
-
-        const success = await this.blockUser(follower);
-        if (success) {
-          blocked++;
-        }
-
-        this.sendProgress(blocked, followers.length, `${follower.username} 차단 완료`);
-
-        // Rate limiting - wait between blocks
-        await this.sleep(1000 + Math.random() * 500);
-      }
-
-      this.sendComplete(true, `${blocked}명의 팔로워를 차단했습니다.`);
+      this.sendComplete(true, `${result.blocked}명의 팔로워를 차단했습니다.`);
 
     } catch (error) {
       console.error('Error blocking followers:', error);
@@ -239,11 +227,12 @@ class ThreadsSweeper {
     }
   }
 
-  async scrapeFollowersList() {
-    const followers = [];
-    const seen = new Set();
+  async blockFollowersFromList(totalFollowers) {
+    const followers = new Set();
+    let blocked = 0;
+    const total = totalFollowers || 0;
 
-    this.sendProgress(0, 0, '팔로워 목록 스크롤 중...');
+    this.sendProgress(0, total, '팔로워 목록 스크롤 중...');
 
     // Find the scrollable container
     const container = document.querySelector('[role="dialog"], [class*="modal"], main');
@@ -257,18 +246,34 @@ class ThreadsSweeper {
       const followerItems = document.querySelectorAll('[class*="UserListItem"], [data-pressable-container="true"] a[href^="/@"]');
 
       for (const item of followerItems) {
-        const link = item.href || item.querySelector('a')?.href;
-        if (link) {
-          const usernameMatch = link.match(/@([^/?]+)/);
-          if (usernameMatch && !seen.has(usernameMatch[1])) {
-            seen.add(usernameMatch[1]);
-            followers.push({
-              username: usernameMatch[1],
-              profileUrl: link,
-              element: item
-            });
-          }
+        if (this.shouldCancel) {
+          return { cancelled: true, blocked, total: total || followers.size };
         }
+
+        const link = item.href || item.querySelector('a')?.href;
+        if (!link) continue;
+
+        const usernameMatch = link.match(/@([^/?]+)/);
+        if (!usernameMatch || followers.has(usernameMatch[1])) {
+          continue;
+        }
+
+        followers.add(usernameMatch[1]);
+        const itemContainer = item.closest('[class*="UserListItem"], [data-pressable-container="true"]') || item;
+        const success = await this.blockUser({
+          username: usernameMatch[1],
+          profileUrl: link,
+          element: itemContainer
+        });
+
+        if (success) {
+          blocked++;
+        }
+
+        this.sendProgress(blocked, total || followers.size, `${usernameMatch[1]} 차단 완료`);
+
+        // Rate limiting - wait between blocks
+        await this.sleep(1000 + Math.random() * 500);
       }
 
       // Scroll down
@@ -289,26 +294,30 @@ class ThreadsSweeper {
         lastHeight = currentHeight;
       }
 
-      this.sendProgress(followers.length, followers.length, `${followers.length}명 발견...`);
+      this.sendProgress(blocked, total || followers.size, `${followers.size}명 발견...`);
     }
 
-    return followers;
+    return { blocked, total: total || followers.size, cancelled: false };
   }
 
   async blockUser(follower) {
     try {
       // Find the user's element and look for the three-dot menu or block button
-      const userElement = document.querySelector(`a[href="/@${follower.username}"]`);
+      const userElement = follower.element || document.querySelector(`a[href="/@${follower.username}"]`);
 
       if (!userElement) {
         return false;
       }
 
       // Find the parent container
-      const container = userElement.closest('[class*="UserListItem"], [data-pressable-container="true"]');
+      const container = userElement.closest('[class*="UserListItem"], [data-pressable-container="true"]') || userElement;
 
       if (!container) {
         return false;
+      }
+
+      if (!this.isElementInViewport(container)) {
+        container.scrollIntoView({ block: 'center' });
       }
 
       // Look for menu button (three dots)
@@ -319,14 +328,14 @@ class ThreadsSweeper {
         await this.sleep(300);
 
         // Look for block option
-        const blockOption = await this.waitForElement('[role="menuitem"]:has-text("Block"), button:contains("차단")');
+        const blockOption = this.findElementByText('[role="menuitem"], button', ['block', '차단']);
 
         if (blockOption) {
           blockOption.click();
           await this.sleep(300);
 
           // Confirm block if needed
-          const confirmButton = document.querySelector('button[class*="confirm"], button:contains("차단")');
+          const confirmButton = this.findElementByText('button', ['block', '차단', 'confirm', '확인']);
           if (confirmButton) {
             confirmButton.click();
           }
@@ -357,8 +366,19 @@ class ThreadsSweeper {
 
       this.sendProgress(1, 4, '게시물 수집 중...');
 
-      // Collect posts
-      const posts = await this.collectPosts();
+      // Collect threads
+      const threads = await this.collectPosts({
+        postType: 'thread',
+        tabLabels: ['threads', '스레드', '게시물']
+      });
+
+      // Collect comments/replies
+      const comments = await this.collectPosts({
+        postType: 'comment',
+        tabLabels: ['replies', '댓글', '답글']
+      });
+
+      const posts = [...threads, ...comments];
 
       this.sendProgress(2, 4, '스크린샷 캡처 중...');
 
@@ -377,6 +397,8 @@ class ThreadsSweeper {
         followerCount: profile.followerCount,
         timestamp: new Date().toISOString(),
         posts: posts,
+        threads: threads,
+        comments: comments,
         screenshots: screenshots
       };
 
@@ -397,7 +419,9 @@ class ThreadsSweeper {
     }
   }
 
-  async collectPosts() {
+  async collectPosts(options = {}) {
+    const { postType = 'thread', tabLabels = [] } = options;
+    await this.switchToTab(tabLabels);
     const posts = [];
     const seen = new Set();
 
@@ -430,6 +454,7 @@ class ThreadsSweeper {
             url: postUrl,
             content: content.substring(0, 500),
             timestamp: timestamp,
+            type: postType,
             element: postEl
           });
         }
@@ -452,7 +477,8 @@ class ThreadsSweeper {
     return posts.map(p => ({
       url: p.url,
       content: p.content,
-      timestamp: p.timestamp
+      timestamp: p.timestamp,
+      type: p.type
     }));
   }
 
@@ -499,6 +525,71 @@ class ThreadsSweeper {
     });
   }
 
+  switchToTab(tabLabels) {
+    if (!tabLabels || tabLabels.length === 0) {
+      return Promise.resolve();
+    }
+
+    const tab = this.findElementByText('[role="tab"]', tabLabels)
+      || this.findElementByText('a, button', tabLabels);
+    if (!tab) {
+      return Promise.resolve();
+    }
+
+    tab.click();
+    return this.sleep(1000).then(() => {
+      window.scrollTo(0, 0);
+      return this.sleep(500);
+    });
+  }
+
+  findElementByText(selector, labels) {
+    const normalizedLabels = labels.map(label => label.toLowerCase());
+    const elements = Array.from(document.querySelectorAll(selector));
+    return elements.find(element => {
+      const text = element.textContent?.trim().toLowerCase().replace(/\s+/g, ' ');
+      return text && normalizedLabels.some(label => {
+        if (text === label) {
+          return true;
+        }
+
+        if (/^[a-z0-9]+$/.test(label)) {
+          const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`\\b${escapedLabel}\\b`).test(text);
+        }
+
+        return text.includes(label);
+      });
+    });
+  }
+
+  parseFollowerCount(countText) {
+    if (!countText) return null;
+
+    const normalized = countText.replace(/,/g, '').replace(/\s+/g, '').trim();
+    const match = normalized.match(/^(\d+(?:\.\d+)?)([kmb천만억])?$/i);
+
+    if (!match) return null;
+
+    const multipliers = { K: 1000, M: 1000000, B: 1000000000, 천: 1000, 만: 10000, 억: 100000000 };
+    let value = parseFloat(match[1]);
+    const rawUnit = match[2];
+    const unit = rawUnit?.toUpperCase();
+    const multiplier = (unit && multipliers[unit]) || (rawUnit && multipliers[rawUnit]);
+
+    if (multiplier) {
+      value *= multiplier;
+    }
+
+    return Math.round(value);
+  }
+
+  isElementInViewport(element) {
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    return rect.top >= 0 && rect.bottom <= viewportHeight;
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -510,7 +601,7 @@ const sweeper = new ThreadsSweeper();
 // Add floating action button on Threads profile pages
 function addFloatingButton() {
   const url = window.location.href;
-  if (!url.match(/threads\.net\/@[^/]+$/)) return;
+  if (!url.match(/threads\.com\/@[^/]+$/)) return;
 
   const existingBtn = document.getElementById('threads-sweeper-fab');
   if (existingBtn) return;
