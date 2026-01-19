@@ -310,7 +310,7 @@ class ThreadsSweeper {
       }
 
       // Find the parent container
-      const container = userElement.closest?.('[class*="UserListItem"], [data-pressable-container="true"]') || userElement;
+      const container = userElement.closest('[class*="UserListItem"], [data-pressable-container="true"]') || userElement;
 
       if (!container) {
         return false;
@@ -333,7 +333,7 @@ class ThreadsSweeper {
           await this.sleep(300);
 
           // Confirm block if needed
-          const confirmButton = this.findElementByText('button', ['block', '차단']);
+          const confirmButton = this.findElementByText('button', ['block', '차단', 'confirm', '확인']);
           if (confirmButton) {
             confirmButton.click();
           }
@@ -545,8 +545,18 @@ class ThreadsSweeper {
     const normalizedLabels = labels.map(label => label.toLowerCase());
     const elements = Array.from(document.querySelectorAll(selector));
     return elements.find(element => {
-      const text = element.textContent?.trim().toLowerCase();
-      return text && normalizedLabels.some(label => text === label || text.includes(label));
+      const text = element.textContent?.trim().toLowerCase().replace(/\s+/g, ' ');
+      return text && normalizedLabels.some(label => {
+        if (text === label) {
+          return true;
+        }
+
+        if (/^[a-z0-9]+$/.test(label)) {
+          return new RegExp(`\\b${label}\\b`).test(text);
+        }
+
+        return text.includes(label);
+      });
     });
   }
 
