@@ -79,7 +79,7 @@ class PopupController {
       let isThreadsPage = false;
       try {
         const currentUrl = new URL(tab.url);
-        isThreadsPage = currentUrl.hostname === 'threads.com' || currentUrl.hostname === 'www.threads.com';
+        isThreadsPage = ['threads.com', 'www.threads.com', 'threads.net', 'www.threads.net'].includes(currentUrl.hostname);
       } catch (error) {
         isThreadsPage = false;
       }
