@@ -72,7 +72,7 @@ class PopupController {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       this.currentTab = tab;
 
-      if (!tab.url || !tab.url.includes('threads.net')) {
+      if (!tab.url || !tab.url.includes('threads.com')) {
         this.setStatus('inactive', 'Threads 페이지가 아닙니다');
         return;
       }

@@ -117,14 +117,14 @@ chrome.runtime.onInstalled.addListener(() => {
     id: 'archive-profile',
     title: '이 프로필 증거 수집',
     contexts: ['page'],
-    documentUrlPatterns: ['https://www.threads.net/@*']
+    documentUrlPatterns: ['https://www.threads.com/@*']
   });
 
   chrome.contextMenus.create({
     id: 'block-followers',
     title: '이 계정의 팔로워 전체 차단',
     contexts: ['page'],
-    documentUrlPatterns: ['https://www.threads.net/@*']
+    documentUrlPatterns: ['https://www.threads.com/@*']
   });
 });
 
