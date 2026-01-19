@@ -111,7 +111,7 @@ class ThreadsSweeper {
   getFollowerCount() {
     // Look for follower count in the page
     const text = document.body.innerText;
-    const followerMatch = text.match(/(\d+(?:,\d+)*(?:\.\d+)?[KMB]?)\s*(?:followers|팔로워)/i);
+    const followerMatch = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)\s*(?:followers|팔로워)/i);
 
     if (followerMatch) {
       return followerMatch[1];
@@ -121,7 +121,7 @@ class ThreadsSweeper {
     const links = document.querySelectorAll('a[href*="followers"]');
     for (const link of links) {
       const text = link.textContent;
-      const match = text.match(/(\d+(?:,\d+)*(?:\.\d+)?[KMB]?)/);
+      const match = text.match(/(\d+(?:,\d+)*(?:\.\d+)?(?:[KMB]|천|만|억)?)/i);
       if (match) {
         return match[1];
       }
@@ -552,7 +552,8 @@ class ThreadsSweeper {
         }
 
         if (/^[a-z0-9]+$/.test(label)) {
-          return new RegExp(`\\b${label}\\b`).test(text);
+          const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`\\b${escapedLabel}\\b`).test(text);
         }
 
         return text.includes(label);
@@ -563,12 +564,12 @@ class ThreadsSweeper {
   parseFollowerCount(countText) {
     if (!countText) return null;
 
-    const normalized = countText.replace(/,/g, '').trim();
-    const match = normalized.match(/^(\d+(?:\.\d+)?)([kmb])?$/i);
+    const normalized = countText.replace(/,/g, '').replace(/\s+/g, '').trim();
+    const match = normalized.match(/^(\d+(?:\.\d+)?)([kmb천만억])?$/i);
 
     if (!match) return null;
 
-    const multipliers = { K: 1000, M: 1000000, B: 1000000000 };
+    const multipliers = { K: 1000, M: 1000000, B: 1000000000, 천: 1000, 만: 10000, 억: 100000000 };
     let value = parseFloat(match[1]);
     const unit = match[2]?.toUpperCase();
 
