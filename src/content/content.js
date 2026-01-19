@@ -316,7 +316,9 @@ class ThreadsSweeper {
         return false;
       }
 
-      container.scrollIntoView({ block: 'center' });
+      if (!this.isElementInViewport(container)) {
+        container.scrollIntoView({ block: 'center' });
+      }
 
       // Look for menu button (three dots)
       const menuButton = container.querySelector('[aria-label*="menu"], [aria-label*="More"], button[class*="more"]');
@@ -571,13 +573,21 @@ class ThreadsSweeper {
 
     const multipliers = { K: 1000, M: 1000000, B: 1000000000, 천: 1000, 만: 10000, 억: 100000000 };
     let value = parseFloat(match[1]);
-    const unit = match[2]?.toUpperCase();
+    const rawUnit = match[2];
+    const unit = rawUnit?.toUpperCase();
+    const multiplier = (unit && multipliers[unit]) || (rawUnit && multipliers[rawUnit]);
 
-    if (unit && multipliers[unit]) {
-      value *= multipliers[unit];
+    if (multiplier) {
+      value *= multiplier;
     }
 
     return Math.round(value);
+  }
+
+  isElementInViewport(element) {
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    return rect.top >= 0 && rect.bottom <= viewportHeight;
   }
 
   sleep(ms) {
