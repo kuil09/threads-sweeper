@@ -6,7 +6,9 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.threads.net/*"
