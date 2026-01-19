@@ -568,12 +568,13 @@ class ThreadsSweeper {
 
     if (!match) return null;
 
+    const multipliers = { K: 1000, M: 1000000, B: 1000000000 };
     let value = parseFloat(match[1]);
     const unit = match[2]?.toUpperCase();
 
-    if (unit === 'K') value *= 1000;
-    if (unit === 'M') value *= 1000000;
-    if (unit === 'B') value *= 1000000000;
+    if (unit && multipliers[unit]) {
+      value *= multipliers[unit];
+    }
 
     return Math.round(value);
   }
