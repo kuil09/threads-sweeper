@@ -1,0 +1,94 @@
+/* Threads Sweeper Content Script Styles */
+
+
+
+/* Overlay for blocking progress */
+#ts-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 999998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#ts-overlay .progress-modal {
+  background: #1a1a1a;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  color: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+#ts-overlay .progress-modal h2 {
+  margin-bottom: 24px;
+  font-size: 20px;
+}
+
+#ts-overlay .progress-bar {
+  height: 8px;
+  background: #333;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+#ts-overlay .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  transition: width 0.3s ease;
+}
+
+#ts-overlay .progress-text {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+#ts-overlay .progress-status {
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 24px;
+}
+
+#ts-overlay .cancel-btn {
+  padding: 12px 32px;
+  background: #ef4444;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#ts-overlay .cancel-btn:hover {
+  background: #dc2626;
+}
+
+/* Highlight blocked users */
+.threads-sweeper-blocked {
+  opacity: 0.5;
+  position: relative;
+}
+
+.threads-sweeper-blocked::after {
+  content: '🚫 차단됨';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
