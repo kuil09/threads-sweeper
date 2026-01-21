@@ -567,6 +567,9 @@ async function performBlockAction(username) {
   const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const activeSleep = (min, max) => sleep(getRandomInt(min, max));
+  
+  // Verification timeout for checking Unblock button
+  const UNBLOCK_VERIFICATION_TIMEOUT = 5000;
 
   // --- Helpers ---
 
@@ -914,7 +917,7 @@ async function performBlockAction(username) {
       // Block button not found. Verify if already blocked by checking for Unblock button.
       console.warn('[Block Script] Block button not found. Checking if already blocked...');
       try {
-        await waitFor(findUnblockButton, 3000, 'Unblock button for verification');
+        await waitFor(findUnblockButton, UNBLOCK_VERIFICATION_TIMEOUT, 'Unblock button for verification');
         console.log('[Block Script] VERIFIED: Unblock button found. Already blocked. Success.');
         return { success: true, error: null };
       } catch (verifyError) {
@@ -965,7 +968,7 @@ async function performBlockAction(username) {
     // 7. Final Verification - Wait for Unblock button to appear
     console.log('[Block Script] Waiting for Unblock button to verify block success...');
     try {
-      await waitFor(findUnblockButton, 5000, 'Unblock button verification');
+      await waitFor(findUnblockButton, UNBLOCK_VERIFICATION_TIMEOUT, 'Unblock button verification');
       console.log('[Block Script] VERIFIED: Unblock button found. Block Successful.');
       return { success: true, error: null };
     } catch (e) {
