@@ -20,7 +20,8 @@ const MESSAGE_TYPES = {
   GET_QUEUE_STATUS: 'GET_QUEUE_STATUS',
   COLLECTION_STARTED: 'COLLECTION_STARTED',
   COLLECTION_STOPPED: 'COLLECTION_STOPPED',
-  SET_MAX_PARALLEL: 'SET_MAX_PARALLEL'
+  SET_MAX_PARALLEL: 'SET_MAX_PARALLEL',
+  RATE_LIMIT_DETECTED: 'RATE_LIMIT_DETECTED'
 };
 
 const DOM_IDS = {
@@ -160,6 +161,8 @@ class PopupController {
         this.addUserToList(message.username);
       } else if (message.type === MESSAGE_TYPES.BLOCK_RESULT) {
         this.markUserBlocked(message.username, message.success);
+      } else if (message.type === MESSAGE_TYPES.RATE_LIMIT_DETECTED) {
+        this.onRateLimitDetected(message.error, message.code);
       }
     });
 
@@ -515,6 +518,28 @@ class PopupController {
     if (!success) {
       // alert(message); // Optional
     }
+  }
+
+  onRateLimitDetected(error, code) {
+    console.error('[Popup] Rate limit detected:', error, code);
+    
+    // Reset processing state
+    this.isProcessing = false;
+    this.isPaused = false;
+    
+    // Reset button states
+    if (this.btnBlockingToggle) {
+      this.btnBlockingToggle.textContent = '차단 시작';
+    }
+    
+    // Show blocking controls if they were hidden
+    if (this.blockingControls) {
+      this.blockingControls.classList.remove('hidden');
+    }
+    
+    // Alert user about rate limit
+    const errorMessage = `Rate Limit 감지: 차단 요청이 너무 빈번합니다.\n\n에러 메시지: ${error}\n에러 코드: ${code}\n\n잠시 후 다시 시도해주세요.`;
+    alert(errorMessage);
   }
 
   updateProgress(current, total, status) {
