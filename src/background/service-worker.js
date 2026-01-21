@@ -911,12 +911,17 @@ async function performBlockAction(username) {
     try {
       blockBtn = await waitFor(findBlockButton, 3000, 'Block button');
     } catch (e) {
-      // Fallback: If Block button not found (and Unblock also not found), 
-      // we assume it is "appear already blocked" or restricted causing UI change.
-      // User request: "appear already blocked... success".
-      // So if we can't block, we treat as success to avoid queue stuck.
-      console.warn('[Block Script] Block button not found. Assumed already blocked or restricted. Success.');
-      return { success: true, error: null };
+      // Block button not found. Verify if already blocked by checking for Unblock button.
+      console.warn('[Block Script] Block button not found. Checking if already blocked...');
+      try {
+        await waitFor(findUnblockButton, 3000, 'Unblock button for verification');
+        console.log('[Block Script] VERIFIED: Unblock button found. Already blocked. Success.');
+        return { success: true, error: null };
+      } catch (verifyError) {
+        // Neither Block nor Unblock button found - actual error
+        console.error('[Block Script] Neither Block nor Unblock button found. Cannot verify status.');
+        throw new Error('Block button not found and could not verify if already blocked');
+      }
     }
 
     blockBtn.click();
@@ -948,7 +953,8 @@ async function performBlockAction(username) {
       console.warn('[Block Script] Dialog did not close in time (or Success toast appeared). verifying status...');
     }
 
-    await activeSleep(1000, 2000);
+    // Increase wait time to allow API response to complete
+    await activeSleep(2000, 3000);
     
     // Check for rate limit after confirmation
     if (rateLimitDetected) {
@@ -956,21 +962,16 @@ async function performBlockAction(username) {
       return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
     }
 
-    // 7. Final Verification
-    // Regardless of dialog state, if we see "Unblock", it is a success.
-    if (findUnblockButton()) {
+    // 7. Final Verification - Wait for Unblock button to appear
+    console.log('[Block Script] Waiting for Unblock button to verify block success...');
+    try {
+      await waitFor(findUnblockButton, 5000, 'Unblock button verification');
       console.log('[Block Script] VERIFIED: Unblock button found. Block Successful.');
       return { success: true, error: null };
-    } else {
-      // If we can't find Unblock button, maybe the dialog is still there blocking it?
-      // Or maybe we failed.
-      // Let's try to find "Block" button again. If it's GONE, we might assume success if we clicked confirm.
-      if (!findBlockButton()) {
-        console.warn('[Block Script] VERIFIED (Weak): Block button is GONE. Assuming Success.');
-        return { success: true, error: null };
-      } else {
-        throw new Error('Verification Failed: Block button still present / Unblock not found');
-      }
+    } catch (e) {
+      // Unblock button not found after waiting - this is a failure
+      console.error('[Block Script] VERIFICATION FAILED: Unblock button not found after block attempt.');
+      throw new Error('Verification Failed: Unblock button not found after block attempt');
     }
 
 
