@@ -19,7 +19,8 @@ const MESSAGE_TYPES = {
   GET_QUEUE_STATUS: 'GET_QUEUE_STATUS',
   COLLECTION_STARTED: 'COLLECTION_STARTED',
   COLLECTION_STOPPED: 'COLLECTION_STOPPED',
-  SET_MAX_PARALLEL: 'SET_MAX_PARALLEL'
+  SET_MAX_PARALLEL: 'SET_MAX_PARALLEL',
+  RATE_LIMIT_DETECTED: 'RATE_LIMIT_DETECTED'
 };
 
 
@@ -282,6 +283,26 @@ async function assignNextJob(index) {
 
   try {
     const result = await runBlockJob(worker.tabId, username);
+
+    // Check for rate limit detection
+    if (result.isRateLimited) {
+      console.error(`[Queue] Rate limit detected for ${username}. Stopping all operations.`);
+      
+      // Add current user back to the front of the queue
+      blockQueue.unshift(username);
+      
+      // Stop all blocking operations
+      await stopBlocking();
+      
+      // Notify popup about rate limit
+      chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.RATE_LIMIT_DETECTED,
+        error: result.error,
+        code: result.code
+      }).catch(() => {});
+      
+      return;
+    }
 
     if (!result.success && result.error && result.error.includes('showing error page')) {
       console.warn(`[Queue] Error Page detected for ${username}. Skipping...`);
@@ -812,12 +833,59 @@ async function performBlockAction(username) {
     return null;
   };
 
-  // --- Execution ---
+  // --- Rate Limit Detection ---
+  
+  const originalFetch = window.fetch;
+  let rateLimitDetected = false;
+  let rateLimitError = null;
+  let rateLimitCode = null;
 
   try {
+    // Intercept fetch to monitor GraphQL responses
+    window.fetch = async function(...args) {
+      const response = await originalFetch.apply(this, args);
+      
+      // Check if this is a GraphQL request
+      const url = args[0];
+      if (url && url.toString().includes('/api/graphql')) {
+        // Clone response to read it without consuming the original
+        const clonedResponse = response.clone();
+        try {
+          const data = await clonedResponse.json();
+          
+          // Check for rate limit errors
+          if (data.errors && Array.isArray(data.errors)) {
+            for (const error of data.errors) {
+              // Check for error code 1675004 or "rate limit" in message
+              if (error.code === 1675004 || 
+                  (error.message && error.message.toLowerCase().includes('rate limit'))) {
+                console.error('[Block Script] Rate limit detected:', error);
+                rateLimitDetected = true;
+                rateLimitError = error.message || 'Rate limit exceeded';
+                rateLimitCode = error.code || 1675004;
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore JSON parse errors
+        }
+      }
+      
+      return response;
+    };
+
+  // --- Execution ---
+
     const initialDelay = getRandomInt(1500, 3000);
     console.log(`[Block Script] Waiting ${initialDelay}ms before starting...`);
     await sleep(initialDelay);
+    
+    // Early check for rate limit detection
+    if (rateLimitDetected) {
+      console.error('[Block Script] Rate limit detected before blocking, aborting.');
+      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+    }
 
     // 1. Check for "Unblock" button immediately on profile
     if (findUnblockButton()) {
@@ -853,6 +921,12 @@ async function performBlockAction(username) {
 
     blockBtn.click();
     await activeSleep(800, 1500);
+    
+    // Check for rate limit after clicking block button
+    if (rateLimitDetected) {
+      console.error('[Block Script] Rate limit detected after clicking block button.');
+      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+    }
 
     // 5. Confirm Block
     console.log('[Block Script] Looking for confirm button...');
@@ -875,6 +949,12 @@ async function performBlockAction(username) {
     }
 
     await activeSleep(1000, 2000);
+    
+    // Check for rate limit after confirmation
+    if (rateLimitDetected) {
+      console.error('[Block Script] Rate limit detected after confirmation.');
+      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+    }
 
     // 7. Final Verification
     // Regardless of dialog state, if we see "Unblock", it is a success.
@@ -897,7 +977,14 @@ async function performBlockAction(username) {
 
   } catch (error) {
     console.error('[Block Script] Error:', error);
+    // Check if rate limit was detected during error handling
+    if (rateLimitDetected) {
+      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+    }
     return { success: false, error: error.message };
+  } finally {
+    // Always restore original fetch
+    window.fetch = originalFetch;
   }
 }
 
