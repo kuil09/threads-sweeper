@@ -592,7 +592,7 @@ async function refreshAndVerifyBlock(worker, username) {
       const [scriptResult] = await chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: verifyBlockedStatus,
-        args: [username]
+        args: [username, UNBLOCK_TEXT_VARIANTS]
       });
       const result = scriptResult?.result || { success: false, error: 'No result from verification script' };
       if (result.success) {
@@ -796,7 +796,7 @@ async function performBlockAction(username) {
   const findUnblockButton = () => {
     // Strategy: Find any visible element that CONTAINS "Unblock" text.
     // We broaden the search to catch cases where role="button" might be missing or nested.
-    const unblockTexts = UNBLOCK_TEXT_VARIANTS;
+    const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
     // Broad candidate list: Buttons, generic divs/spans that might be buttons
     const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
@@ -1069,7 +1069,7 @@ async function performBlockAction(username) {
   }
 }
 
-async function verifyBlockedStatus(username) {
+async function verifyBlockedStatus(username, unblockTextVariants = []) {
   console.log(`[Block Script] Verifying block status after refresh for ${username}`);
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1091,7 +1091,7 @@ async function verifyBlockedStatus(username) {
       if (el.childElementCount > 3) continue;
       const text = el.innerText?.trim() || '';
       if (!text) continue;
-      const includesMatch = UNBLOCK_TEXT_VARIANTS.some(t => text.includes(t));
+      const includesMatch = unblockTextVariants.some(t => text.includes(t));
       if (includesMatch && text.length < 20) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
