@@ -187,7 +187,8 @@ let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
 let maxParallelWorkers = 1; // Updated via SET_MAX_PARALLEL (1~10)
 const VERIFY_REFRESH_MAX_ATTEMPTS = 3;
 const VERIFY_REFRESH_BASE_DELAY = 1500;
-const VERIFY_REFRESH_STEP_DELAY = 1000;
+const VERIFY_REFRESH_BACKOFF_MULTIPLIER = 2;
+const UNBLOCK_TEXT_VARIANTS = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
 // Each worker represents one automation window + active tab + current job
 // workers[i] = { windowId, tabId, busy, currentUser, retire, resolver }
@@ -574,8 +575,9 @@ async function refreshAndVerifyBlock(worker, username) {
     return { success: false, error: 'Verification failed: missing tab' };
   }
 
+  let lastError;
   for (let attempt = 0; attempt < VERIFY_REFRESH_MAX_ATTEMPTS; attempt++) {
-    const delay = VERIFY_REFRESH_BASE_DELAY + (attempt * VERIFY_REFRESH_STEP_DELAY);
+    const delay = VERIFY_REFRESH_BASE_DELAY * Math.pow(VERIFY_REFRESH_BACKOFF_MULTIPLIER, attempt);
     console.warn(`[Queue] Verification failed for ${username}. Refreshing profile (attempt ${attempt + 1}/${VERIFY_REFRESH_MAX_ATTEMPTS}) after ${delay}ms...`);
     await new Promise(r => setTimeout(r, delay));
     try {
@@ -596,13 +598,15 @@ async function refreshAndVerifyBlock(worker, username) {
       if (result.success) {
         return result;
       }
+      lastError = result.error;
     } catch (error) {
       console.error(`[Queue] Verification script failed for ${username}:`, error);
-      return { success: false, error: error.message };
+      lastError = error;
     }
   }
 
-  return { success: false, error: 'Verification failed: Unblock button not found after refresh retries' };
+  const errorMessage = typeof lastError === 'string' ? lastError : lastError?.message;
+  return { success: false, error: errorMessage || 'Verification failed: Unblock button not found after refresh retries' };
 }
 
 function waitForTabLoad(tabId) {
@@ -792,7 +796,7 @@ async function performBlockAction(username) {
   const findUnblockButton = () => {
     // Strategy: Find any visible element that CONTAINS "Unblock" text.
     // We broaden the search to catch cases where role="button" might be missing or nested.
-    const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
+    const unblockTexts = UNBLOCK_TEXT_VARIANTS;
 
     // Broad candidate list: Buttons, generic divs/spans that might be buttons
     const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
@@ -1081,14 +1085,13 @@ async function verifyBlockedStatus(username) {
 
   const root = document.querySelector('main, [role="main"]') || document.body;
   const findUnblockButton = () => {
-    const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
     const candidates = root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span[dir="auto"], div[dir="auto"]');
 
     for (const el of candidates) {
       if (el.childElementCount > 3) continue;
       const text = el.innerText?.trim() || '';
       if (!text) continue;
-      const includesMatch = unblockTexts.some(t => text.includes(t));
+      const includesMatch = UNBLOCK_TEXT_VARIANTS.some(t => text.includes(t));
       if (includesMatch && text.length < 20) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
