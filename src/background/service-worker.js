@@ -308,22 +308,19 @@ async function executeBlockJob(index, worker, username) {
       return;
     }
 
-    if (!result.success && result.verificationFailed) {
-      const refreshResult = await refreshAndVerifyBlock(worker, username);
-      if (refreshResult.success) {
-        notifyProgress(username, true, null);
-      } else {
-        notifyProgress(username, false, refreshResult.error || result.error);
-      }
-      return;
-    }
-
     if (!result.success && result.error && result.error.includes('showing error page')) {
       console.warn(`[Queue] Error Page detected for ${username}. Skipping...`);
       notifyProgress(username, false, '페이지 로드 실패 (404/Network)');
     } else {
-      console.log(`[Queue] Job finished for ${username}:`, result);
-      notifyProgress(username, result.success, result.error);
+      let finalResult = result;
+      if (!result.success && result.verificationFailed) {
+        const refreshResult = await refreshAndVerifyBlock(worker, username);
+        finalResult = refreshResult.success
+          ? { success: true, error: null }
+          : { success: false, error: refreshResult.error || result.error };
+      }
+      console.log(`[Queue] Job finished for ${username}:`, finalResult);
+      notifyProgress(username, finalResult.success, finalResult.error);
     }
   } catch (error) {
     console.error(`[Queue] Critical error processing ${username} on worker #${index + 1}:`, error);
@@ -577,8 +574,8 @@ async function refreshAndVerifyBlock(worker, username) {
   }
 
   let lastError;
+  let delay = VERIFY_REFRESH_BASE_DELAY;
   for (let attempt = 0; attempt < VERIFY_REFRESH_MAX_ATTEMPTS; attempt++) {
-    const delay = VERIFY_REFRESH_BASE_DELAY * Math.pow(VERIFY_REFRESH_BACKOFF_MULTIPLIER, attempt);
     console.warn(`[Queue] Verification failed for ${username}. Refreshing profile (attempt ${attempt + 1}/${VERIFY_REFRESH_MAX_ATTEMPTS}) after ${delay}ms...`);
     await new Promise(r => setTimeout(r, delay));
     try {
@@ -604,6 +601,7 @@ async function refreshAndVerifyBlock(worker, username) {
       console.error(`[Queue] Verification script failed for ${username}:`, error);
       lastError = error;
     }
+    delay *= VERIFY_REFRESH_BACKOFF_MULTIPLIER;
   }
 
   const errorMessage = typeof lastError === 'string' ? lastError : lastError?.message;
@@ -1101,17 +1099,35 @@ async function verifyBlockedStatus(username, unblockTextVariants = [], refreshVe
   try {
     await new Promise((resolve, reject) => {
       const start = Date.now();
-      const timer = setInterval(() => {
-        if (findUnblockButton()) {
+      let timer;
+      const cleanup = () => {
+        if (timer) {
           clearInterval(timer);
-          resolve();
-          return;
+          timer = null;
         }
-        if (Date.now() - start > refreshVerificationTimeout) {
-          clearInterval(timer);
-          reject(new Error(`Unblock button verification not found after ${refreshVerificationTimeout}ms`));
-        }
-      }, 400);
+      };
+      try {
+        timer = setInterval(() => {
+          try {
+            if (findUnblockButton()) {
+              cleanup();
+              resolve();
+              return;
+            }
+          } catch (innerError) {
+            cleanup();
+            reject(innerError);
+            return;
+          }
+          if (Date.now() - start > refreshVerificationTimeout) {
+            cleanup();
+            reject(new Error(`Unblock button verification not found after ${refreshVerificationTimeout}ms`));
+          }
+        }, 400);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
     console.log('[Block Script] VERIFIED: Unblock button found after refresh.');
     return { success: true, error: null };
