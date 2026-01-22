@@ -18,13 +18,12 @@ jobs:
       
       - name: Create release archive
         run: |
-          mkdir -p release
-          zip -r release/threads-sweeper-${{ github.ref_name }}.zip \
-            manifest.json \
-            src/ \
-            icons/ \
-            README.md \
-            -x '*.git*' '*.DS_Store' 'node_modules/*' '*.env*'
+          mkdir -p release/package
+          cp -r manifest.json src/ icons/ README.md release/package/
+          cd release/package
+          zip -r ../threads-sweeper-${{ github.ref_name }}.zip .
+          cd ..
+          rm -rf package
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
