@@ -24,7 +24,7 @@ jobs:
             src/ \
             icons/ \
             README.md \
-            -x "*.git*" "*.DS_Store" "*/node_modules/*" "*.env*"
+            -x '*.git*' '*.DS_Store' 'node_modules/*' '*.env*'
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
