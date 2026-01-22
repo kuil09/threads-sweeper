@@ -163,7 +163,6 @@ async function handleMessage(message, sender, sendResponse) {
 
 let blockQueue = [];
 let isProcessingQueue = false;
-let currentJobResolver = null;
 let collectionWindowId = null; // Track window for size enforcement
 let resizeTimeout = null;
 
@@ -180,7 +179,6 @@ chrome.windows.onBoundsChanged.addListener((window) => {
   }
 });
 
-let currentProcessingUser = null; // Track currently processing user to prevent re-add
 let activeTabId = null; // The tab inside the automation window (legacy)
 let automationWindowId = null; // The dedicated window ID (legacy single-worker reference)
 let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
@@ -189,7 +187,7 @@ let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
 let maxParallelWorkers = 1; // Updated via SET_MAX_PARALLEL (1~10)
 
 // Each worker represents one automation window + active tab + current job
-// workers[i] = { windowId, tabId, busy, currentUser, retire }
+// workers[i] = { windowId, tabId, busy, currentUser, retire, resolver }
 let workers = [];
 let workerWindowIds = new Set();
 let creatingWorkers = new Set();
@@ -232,7 +230,8 @@ async function ensureWorker(index) {
     tabId,
     busy: false,
     currentUser: null,
-    retire: false
+    retire: false,
+    resolver: null
   };
   workers[index] = worker;
   return worker;
@@ -256,7 +255,7 @@ async function closeWorker(index, reason = 'cleanup') {
   if (worker.windowId && workerWindowIds.has(worker.windowId)) {
     workerWindowIds.delete(worker.windowId);
   }
-  workers[index] = { windowId: null, tabId: null, busy: false, currentUser: null, retire: false };
+  workers[index] = { windowId: null, tabId: null, busy: false, currentUser: null, retire: false, resolver: null };
   console.log(`[Queue] Worker #${index + 1} closed (${reason}).`);
 }
 
@@ -272,7 +271,6 @@ function startWorkerJob(index) {
 
   worker.busy = true;
   worker.currentUser = username;
-  currentProcessingUser = username;
 
   console.log(`[Queue] Worker #${index + 1} starting job for ${username}. Remaining in queue: ${blockQueue.length}`);
 
@@ -283,7 +281,7 @@ function startWorkerJob(index) {
 // Executes the actual blocking job
 async function executeBlockJob(index, worker, username) {
   try {
-    const result = await runBlockJob(worker.tabId, username);
+    const result = await runBlockJob(worker, username);
 
     // Check for rate limit detection
     if (result.isRateLimited) {
@@ -318,7 +316,7 @@ async function executeBlockJob(index, worker, username) {
   } finally {
     worker.busy = false;
     worker.currentUser = null;
-    currentProcessingUser = null;
+    worker.resolver = null;
 
     if (worker.retire) {
       await closeWorker(index, 'retire');
@@ -351,10 +349,15 @@ function addToBlockQueue(users, tabId, currentUrl, autoStart = true) {
     }
   }
 
-  // Filter duplicates (Strict: not in queue AND not currently being processed)
+  // Get currently processing users from all workers
+  const currentlyProcessing = new Set(
+    workers.filter(w => w && w.currentUser).map(w => w.currentUser)
+  );
+
+  // Filter duplicates (Strict: not in queue AND not currently being processed by any worker)
   const uniqueInput = [...new Set(users)]; // Deduplicate input batch first
   const newUsers = uniqueInput.filter(u =>
-    !blockQueue.includes(u) && u !== currentProcessingUser
+    !blockQueue.includes(u) && !currentlyProcessing.has(u)
   );
 
   blockQueue.push(...newUsers);
@@ -373,12 +376,13 @@ async function stopBlocking() {
   blockQueue = [];
   isProcessingQueue = false;
 
-  // Resolve current job to cancel it (best-effort)
-  if (currentJobResolver) {
-    currentJobResolver({ success: false, error: 'Stopped by user' });
-    currentJobResolver = null;
+  // Resolve all workers' jobs to cancel them (best-effort)
+  for (const worker of workers) {
+    if (worker && worker.resolver) {
+      worker.resolver({ success: false, error: 'Stopped by user' });
+      worker.resolver = null;
+    }
   }
-  currentProcessingUser = null;
 
   // Close all worker windows
   for (const worker of workers) {
@@ -458,7 +462,6 @@ async function processBlockQueue() {
     const queueEmpty = blockQueue.length === 0;
 
     isProcessingQueue = false;
-    currentJobResolver = null;
 
     // Auto-close worker windows only when work really finished (not paused).
     if (queueEmpty && !anyBusy) {
@@ -487,10 +490,11 @@ async function processBlockQueue() {
 }
 
 // Wraps the blocking process in a Promise
-function runBlockJob(tabId, username) {
+function runBlockJob(worker, username) {
+  const tabId = worker.tabId;
   return new Promise(async (resolve) => {
-    // Set the global resolver so handleMessage can find it
-    currentJobResolver = resolve;
+    // Store resolver on worker so it can be cancelled independently
+    worker.resolver = resolve;
 
     try {
       console.log(`[Queue] Processing ${username} on tab ${tabId}`);
@@ -530,22 +534,22 @@ function runBlockJob(tabId, username) {
         // executeScript returns the function's return value in result property
         const result = scriptResult?.result || { success: false, error: 'No result from script' };
         resolve(result);
-        currentJobResolver = null;
+        worker.resolver = null;
 
       } catch (scriptError) {
         if (scriptError.message.includes('showing error page')) {
           resolve({ success: false, error: 'showing error page' });
-          currentJobResolver = null;
+          worker.resolver = null;
           return;
         }
         resolve({ success: false, error: scriptError.message });
-        currentJobResolver = null;
+        worker.resolver = null;
       }
 
     } catch (error) {
       console.error(`[Queue] Setup error for ${username}:`, error);
       resolve({ success: false, error: error.message });
-      currentJobResolver = null;
+      worker.resolver = null;
     }
   });
 }
