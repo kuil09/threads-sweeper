@@ -50,7 +50,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
   const workerIndex = workers.findIndex(w => w && w.windowId === windowId);
   if (workerIndex !== -1) {
     console.log(`[Queue] Worker window #${workerIndex + 1} closed by user.`);
-    workers[workerIndex] = { windowId: null, tabId: null, busy: false, currentUser: null, retire: false };
+    workers[workerIndex] = { windowId: null, tabId: null, busy: false, currentUser: null, retire: false, resolver: null };
   }
   if (workerWindowIds.has(windowId)) {
     workerWindowIds.delete(windowId);
@@ -381,6 +381,7 @@ async function stopBlocking() {
     if (worker && worker.resolver) {
       worker.resolver({ success: false, error: 'Stopped by user' });
       worker.resolver = null;
+      worker.currentUser = null;
     }
   }
 
