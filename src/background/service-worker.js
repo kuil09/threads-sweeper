@@ -413,14 +413,21 @@ async function processBlockQueue() {
   if (blockQueue.length === 0) return;
 
   isProcessingQueue = true;
-  console.log('[Queue] Starting processing loop with worker pool. Queue length:', blockQueue.length, 'maxParallelWorkers:', maxParallelWorkers);
+  
+  // Capture maxParallelWorkers at the start of processing to ensure consistent behavior.
+  // This prevents mid-flight changes from affecting the current batch.
+  const effectiveMaxWorkers = maxParallelWorkers;
+  console.log('[Queue] Starting processing loop with worker pool. Queue length:', blockQueue.length, 'effectiveMaxWorkers:', effectiveMaxWorkers);
 
   try {
-    // Kick off initial assignments up to maxParallelWorkers or queue length.
-    const initialWorkers = Math.min(Math.max(1, maxParallelWorkers), Math.max(1, blockQueue.length));
+    // Calculate the number of workers to create: exactly the minimum of:
+    // 1. User-selected concurrency (effectiveMaxWorkers)
+    // 2. Number of users in the queue (no point in creating more workers than users)
+    const initialWorkers = Math.min(effectiveMaxWorkers, blockQueue.length);
     console.log('[Queue] Initializing', initialWorkers, 'worker(s)...');
 
-    // Create all workers first (sequentially to avoid race condition)
+    // Create all workers first, THEN start processing.
+    // This ensures only the selected number of windows open before any work begins.
     for (let i = 0; i < initialWorkers; i++) {
       await ensureWorker(i);
     }
@@ -433,9 +440,9 @@ async function processBlockQueue() {
     // Wait until queue is empty and all workers are idle, or we are paused/stopped.
     while (isProcessingQueue && (blockQueue.length > 0 || getActiveWorkerCount() > 0)) {
       // If some workers are idle while queue still has items, assign new jobs to them.
+      // Only use workers up to the initial count (effectiveMaxWorkers) - no dynamic expansion.
       if (blockQueue.length > 0) {
-        const desiredWorkers = Math.min(maxParallelWorkers, blockQueue.length + getActiveWorkerCount());
-        for (let i = 0; i < desiredWorkers; i++) {
+        for (let i = 0; i < initialWorkers; i++) {
           const worker = workers[i];
           if (worker && !worker.busy) {
             startWorkerJob(i);
