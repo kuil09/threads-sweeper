@@ -593,7 +593,7 @@ async function refreshAndVerifyBlock(worker, username) {
       const [scriptResult] = await chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: verifyBlockedStatus,
-        args: [username, UNBLOCK_TEXT_VARIANTS]
+        args: [username, UNBLOCK_TEXT_VARIANTS, REFRESH_VERIFICATION_TIMEOUT]
       });
       const result = scriptResult?.result || { success: false, error: 'No result from verification script' };
       if (result.success) {
@@ -1072,8 +1072,12 @@ async function performBlockAction(username, unblockTextVariants = []) {
   }
 }
 
-async function verifyBlockedStatus(username, unblockTextVariants = []) {
+async function verifyBlockedStatus(username, unblockTextVariants = [], refreshVerificationTimeout = 8000) {
   console.log(`[Block Script] Verifying block status after refresh for ${username}`);
+
+  const effectiveVariants = unblockTextVariants.length
+    ? unblockTextVariants
+    : ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
   const root = document.querySelector('main, [role="main"]') || document.body;
   const findUnblockButton = () => {
@@ -1083,7 +1087,7 @@ async function verifyBlockedStatus(username, unblockTextVariants = []) {
       if (el.childElementCount > 3) continue;
       const text = el.innerText?.trim() || '';
       if (!text) continue;
-      const includesMatch = unblockTextVariants.some(t => text.includes(t));
+      const includesMatch = effectiveVariants.some(t => text.includes(t));
       if (includesMatch && text.length < 20) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
@@ -1103,9 +1107,9 @@ async function verifyBlockedStatus(username, unblockTextVariants = []) {
           resolve();
           return;
         }
-        if (Date.now() - start > REFRESH_VERIFICATION_TIMEOUT) {
+        if (Date.now() - start > refreshVerificationTimeout) {
           clearInterval(timer);
-          reject(new Error(`Unblock button verification not found after ${REFRESH_VERIFICATION_TIMEOUT}ms`));
+          reject(new Error(`Unblock button verification not found after ${refreshVerificationTimeout}ms`));
         }
       }, 400);
     });
