@@ -189,6 +189,7 @@ const VERIFY_REFRESH_MAX_ATTEMPTS = 3;
 const VERIFY_REFRESH_BASE_DELAY = 1500;
 const VERIFY_REFRESH_BACKOFF_MULTIPLIER = 2;
 const UNBLOCK_TEXT_VARIANTS = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
+const REFRESH_VERIFICATION_TIMEOUT = 8000;
 
 // Each worker represents one automation window + active tab + current job
 // workers[i] = { windowId, tabId, busy, currentUser, retire, resolver }
@@ -543,7 +544,7 @@ function runBlockJob(worker, username) {
         const [scriptResult] = await chrome.scripting.executeScript({
           target: { tabId: tabId },
           func: performBlockAction,
-          args: [username]
+          args: [username, UNBLOCK_TEXT_VARIANTS]
         });
 
         // executeScript returns the function's return value in result property
@@ -636,7 +637,7 @@ function notifyProgress(username, success, error) {
 }
 
 // This function is injected into the page
-async function performBlockAction(username) {
+async function performBlockAction(username, unblockTextVariants = []) {
   console.log(`[Block Script] Started for ${username}`);
 
   const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -796,7 +797,9 @@ async function performBlockAction(username) {
   const findUnblockButton = () => {
     // Strategy: Find any visible element that CONTAINS "Unblock" text.
     // We broaden the search to catch cases where role="button" might be missing or nested.
-    const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
+    const unblockTexts = unblockTextVariants.length
+      ? unblockTextVariants
+      : ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
     // Broad candidate list: Buttons, generic divs/spans that might be buttons
     const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
@@ -1080,8 +1083,8 @@ async function verifyBlockedStatus(username, unblockTextVariants = []) {
       if (el.childElementCount > 3) continue;
       const text = el.innerText?.trim() || '';
       if (!text) continue;
-      const matchesText = unblockTextVariants.some(t => text === t || text === `${t}...` || text.includes(t));
-      if (matchesText && text.length < 20) {
+      const includesMatch = unblockTextVariants.some(t => text.includes(t));
+      if (includesMatch && text.length < 20) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           return el;
@@ -1100,9 +1103,9 @@ async function verifyBlockedStatus(username, unblockTextVariants = []) {
           resolve();
           return;
         }
-        if (Date.now() - start > 8000) {
+        if (Date.now() - start > REFRESH_VERIFICATION_TIMEOUT) {
           clearInterval(timer);
-          reject(new Error('Unblock button verification not found after 8000ms'));
+          reject(new Error(`Unblock button verification not found after ${REFRESH_VERIFICATION_TIMEOUT}ms`));
         }
       }, 400);
     });
