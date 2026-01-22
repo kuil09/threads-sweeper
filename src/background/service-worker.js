@@ -185,6 +185,11 @@ let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
 
 // Parallel worker pool configuration
 let maxParallelWorkers = 1; // Updated via SET_MAX_PARALLEL (1~10)
+const VERIFY_REFRESH_MAX_ATTEMPTS = 3;
+const VERIFY_REFRESH_BASE_DELAY = 1500;
+const VERIFY_REFRESH_BACKOFF_MULTIPLIER = 2;
+const UNBLOCK_TEXT_VARIANTS = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
+const REFRESH_VERIFICATION_TIMEOUT = 8000;
 
 // Each worker represents one automation window + active tab + current job
 // workers[i] = { windowId, tabId, busy, currentUser, retire, resolver }
@@ -307,8 +312,15 @@ async function executeBlockJob(index, worker, username) {
       console.warn(`[Queue] Error Page detected for ${username}. Skipping...`);
       notifyProgress(username, false, '페이지 로드 실패 (404/Network)');
     } else {
-      console.log(`[Queue] Job finished for ${username}:`, result);
-      notifyProgress(username, result.success, result.error);
+      let finalResult = result;
+      if (!result.success && result.verificationFailed) {
+        const refreshResult = await refreshAndVerifyBlock(worker, username);
+        finalResult = refreshResult.success
+          ? { success: true, error: null }
+          : { success: false, error: refreshResult.error || result.error };
+      }
+      console.log(`[Queue] Job finished for ${username}:`, finalResult);
+      notifyProgress(username, finalResult.success, finalResult.error);
     }
   } catch (error) {
     console.error(`[Queue] Critical error processing ${username} on worker #${index + 1}:`, error);
@@ -529,7 +541,7 @@ function runBlockJob(worker, username) {
         const [scriptResult] = await chrome.scripting.executeScript({
           target: { tabId: tabId },
           func: performBlockAction,
-          args: [username]
+          args: [username, UNBLOCK_TEXT_VARIANTS]
         });
 
         // executeScript returns the function's return value in result property
@@ -553,6 +565,47 @@ function runBlockJob(worker, username) {
       worker.resolver = null;
     }
   });
+}
+
+async function refreshAndVerifyBlock(worker, username) {
+  const tabId = worker?.tabId;
+  if (!tabId) {
+    return { success: false, error: 'Verification failed: missing tab' };
+  }
+
+  let lastError;
+  let delay = VERIFY_REFRESH_BASE_DELAY;
+  for (let attempt = 0; attempt < VERIFY_REFRESH_MAX_ATTEMPTS; attempt++) {
+    console.warn(`[Queue] Verification failed for ${username}. Refreshing profile (attempt ${attempt + 1}/${VERIFY_REFRESH_MAX_ATTEMPTS}) after ${delay}ms...`);
+    await new Promise(r => setTimeout(r, delay));
+    try {
+      await chrome.tabs.reload(tabId);
+    } catch (error) {
+      console.error(`[Queue] Failed to reload tab for ${username}:`, error);
+      return { success: false, error: error.message };
+    }
+    await waitForTabLoad(tabId);
+
+    try {
+      const [scriptResult] = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: verifyBlockedStatus,
+        args: [username, UNBLOCK_TEXT_VARIANTS, REFRESH_VERIFICATION_TIMEOUT]
+      });
+      const result = scriptResult?.result || { success: false, error: 'No result from verification script' };
+      if (result.success) {
+        return result;
+      }
+      lastError = result.error;
+    } catch (error) {
+      console.error(`[Queue] Verification script failed for ${username}:`, error);
+      lastError = error;
+    }
+    delay *= VERIFY_REFRESH_BACKOFF_MULTIPLIER;
+  }
+
+  const errorMessage = typeof lastError === 'string' ? lastError : lastError?.message;
+  return { success: false, error: errorMessage || 'Verification failed: Unblock button not found after refresh retries' };
 }
 
 function waitForTabLoad(tabId) {
@@ -582,7 +635,7 @@ function notifyProgress(username, success, error) {
 }
 
 // This function is injected into the page
-async function performBlockAction(username) {
+async function performBlockAction(username, unblockTextVariants = []) {
   console.log(`[Block Script] Started for ${username}`);
 
   const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -590,7 +643,7 @@ async function performBlockAction(username) {
   const activeSleep = (min, max) => sleep(getRandomInt(min, max));
 
   // Verification timeout for checking Unblock button
-  const UNBLOCK_VERIFICATION_TIMEOUT = 5000;
+  const UNBLOCK_VERIFICATION_TIMEOUT = 12000;
 
   // --- Helpers ---
 
@@ -742,7 +795,9 @@ async function performBlockAction(username) {
   const findUnblockButton = () => {
     // Strategy: Find any visible element that CONTAINS "Unblock" text.
     // We broaden the search to catch cases where role="button" might be missing or nested.
-    const unblockTexts = ['차단 해제', '차단해제', 'Unblock'];
+    const unblockTexts = unblockTextVariants.length
+      ? unblockTextVariants
+      : ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
     // Broad candidate list: Buttons, generic divs/spans that might be buttons
     const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
@@ -997,7 +1052,7 @@ async function performBlockAction(username) {
     } catch (e) {
       // Unblock button not found after waiting - this is a failure
       console.error('[Block Script] VERIFICATION FAILED: Unblock button not found after block attempt.');
-      throw new Error('Verification Failed: Unblock button not found after block attempt');
+      return { success: false, error: 'Verification failed: Unblock button not found after block attempt', verificationFailed: true };
     }
 
 
@@ -1015,4 +1070,69 @@ async function performBlockAction(username) {
   }
 }
 
+async function verifyBlockedStatus(username, unblockTextVariants = [], refreshVerificationTimeout = 8000) {
+  console.log(`[Block Script] Verifying block status after refresh for ${username}`);
 
+  const effectiveVariants = unblockTextVariants.length
+    ? unblockTextVariants
+    : ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
+
+  const root = document.querySelector('main, [role="main"]') || document.body;
+  const findUnblockButton = () => {
+    const candidates = root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
+
+    for (const el of candidates) {
+      if (el.childElementCount > 3) continue;
+      const text = el.innerText?.trim() || '';
+      if (!text) continue;
+      const includesMatch = effectiveVariants.some(t => text.includes(t));
+      if (includesMatch && text.length < 20) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          return el;
+        }
+      }
+    }
+    return null;
+  };
+
+  try {
+    await new Promise((resolve, reject) => {
+      const start = Date.now();
+      let timer;
+      const cleanup = () => {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+      try {
+        timer = setInterval(() => {
+          try {
+            if (findUnblockButton()) {
+              cleanup();
+              resolve();
+              return;
+            }
+          } catch (innerError) {
+            cleanup();
+            reject(innerError);
+            return;
+          }
+          if (Date.now() - start > refreshVerificationTimeout) {
+            cleanup();
+            reject(new Error(`Unblock button verification not found after ${refreshVerificationTimeout}ms`));
+          }
+        }, 400);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
+    console.log('[Block Script] VERIFIED: Unblock button found after refresh.');
+    return { success: true, error: null };
+  } catch (error) {
+    console.warn('[Block Script] Verification still failing after refresh.');
+    return { success: false, error: error.message };
+  }
+}
