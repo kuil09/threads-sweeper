@@ -185,6 +185,9 @@ let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
 
 // Parallel worker pool configuration
 let maxParallelWorkers = 1; // Updated via SET_MAX_PARALLEL (1~10)
+const VERIFY_REFRESH_MAX_ATTEMPTS = 3;
+const VERIFY_REFRESH_BASE_DELAY = 1500;
+const VERIFY_REFRESH_STEP_DELAY = 1000;
 
 // Each worker represents one automation window + active tab + current job
 // workers[i] = { windowId, tabId, busy, currentUser, retire, resolver }
@@ -571,9 +574,9 @@ async function refreshAndVerifyBlock(worker, username) {
     return { success: false, error: 'Verification failed: missing tab' };
   }
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const delay = 1500 + (attempt * 1000);
-    console.warn(`[Queue] Verification failed for ${username}. Refreshing profile (attempt ${attempt + 1}/3) after ${delay}ms...`);
+  for (let attempt = 0; attempt < VERIFY_REFRESH_MAX_ATTEMPTS; attempt++) {
+    const delay = VERIFY_REFRESH_BASE_DELAY + (attempt * VERIFY_REFRESH_STEP_DELAY);
+    console.warn(`[Queue] Verification failed for ${username}. Refreshing profile (attempt ${attempt + 1}/${VERIFY_REFRESH_MAX_ATTEMPTS}) after ${delay}ms...`);
     await new Promise(r => setTimeout(r, delay));
     try {
       await chrome.tabs.reload(tabId);
@@ -599,7 +602,7 @@ async function refreshAndVerifyBlock(worker, username) {
     }
   }
 
-  return { success: false, error: 'Verification Failed: Unblock button not found after refresh retries' };
+  return { success: false, error: 'Verification failed: Unblock button not found after refresh retries' };
 }
 
 function waitForTabLoad(tabId) {
@@ -1044,7 +1047,7 @@ async function performBlockAction(username) {
     } catch (e) {
       // Unblock button not found after waiting - this is a failure
       console.error('[Block Script] VERIFICATION FAILED: Unblock button not found after block attempt.');
-      return { success: false, error: 'Verification Failed: Unblock button not found after block attempt', verificationFailed: true };
+      return { success: false, error: 'Verification failed: Unblock button not found after block attempt', verificationFailed: true };
     }
 
 
@@ -1076,9 +1079,10 @@ async function verifyBlockedStatus(username) {
     throw new Error(`${name} not found after ${timeout}ms`);
   };
 
+  const root = document.querySelector('main, [role="main"]') || document.body;
   const findUnblockButton = () => {
     const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
-    const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
+    const candidates = root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span[dir="auto"], div[dir="auto"]');
 
     for (const el of candidates) {
       if (el.childElementCount > 3) continue;
