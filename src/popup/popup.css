@@ -1,0 +1,454 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-color: #ffffff;
+  --text-color: #1a1a1a;
+  --card-bg: #f8f8f8;
+  /* Slightly lighter than gray */
+  --border-color: #dbdbdb;
+  --subtext-color: #737373;
+  --accent-color: #0095f6;
+  --danger-color: #ed4956;
+  --secondary-btn-bg: #efefef;
+  --secondary-btn-hover: #dbdbdb;
+  --input-bg: #ffffff;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-color);
+  color: var(--text-color);
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  font-size: 14px;
+}
+
+.container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding-bottom: 20px;
+}
+
+/* Footer (Removed per simplification, not strictly needed for logic but keeping clean) */
+
+/* Header */
+header {
+  text-align: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+  position: relative;
+}
+
+.header-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  margin-bottom: 4px;
+}
+
+header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 16px;
+}
+
+.section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--subtext-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Status */
+.status-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ccc;
+}
+
+.status-indicator.active {
+  background: #22c55e;
+}
+
+.status-indicator.inactive {
+  background: var(--danger-color);
+}
+
+.status-indicator.loading {
+  background: #f59e0b;
+}
+
+/* Profile Card */
+.profile-card {
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 0;
+}
+
+.profile-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.profile-handle {
+  font-size: 13px;
+  color: var(--subtext-color);
+}
+
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:last-child {
+  margin-bottom: 0;
+}
+
+.btn-icon {
+  font-size: 16px;
+}
+
+.btn-danger {
+  background: var(--danger-color);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-secondary {
+  background: var(--secondary-btn-bg);
+  color: var(--text-color);
+  border: 1px solid transparent;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--secondary-btn-hover);
+}
+
+/* Progress */
+.progress-container {
+  margin-bottom: 12px;
+}
+
+.progress-text {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.progress-status {
+  text-align: center;
+  font-size: 12px;
+  color: var(--subtext-color);
+  margin-bottom: 12px;
+}
+
+/* Input Group */
+.input-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+#manual-add-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-color);
+  font-size: 13px;
+  outline: none;
+}
+
+#manual-add-input:focus {
+  border-color: var(--accent-color);
+}
+
+#btn-manual-add {
+  width: auto;
+  margin: 0;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+/* User List */
+#user-list-container {
+  height: 250px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--subtext-color);
+  font-size: 13px;
+}
+
+.user-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.user-item:last-child {
+  border-bottom: none;
+}
+
+.user-item.blocked {
+  text-decoration: line-through;
+  color: var(--subtext-color);
+}
+
+.user-item.failed {
+  color: var(--danger-color);
+}
+
+/* Controls */
+.action-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  /* Increased vertical spacing */
+}
+
+.action-controls:last-of-type {
+  margin-bottom: 0px;
+}
+
+.action-controls button {
+  margin: 0;
+}
+
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.reset-btn {
+  color: var(--subtext-color);
+  font-size: 12px;
+}
+
+.reset-btn:hover {
+  color: var(--danger-color);
+}
+
+/* Small Buttons */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+  width: auto;
+  margin-top: 8px;
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--accent-color);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+.btn-primary {
+  background: var(--accent-color);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #007bb5;
+}
+
+/* Profile Section Adjustments */
+#profile-section {
+  background: #fff;
+  /* White bg for contrast */
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+#profile-section .profile-card {
+  padding: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+}
+
+#profile-section .profile-info {
+  margin: 0;
+}
+
+/* Usage Guide */
+.usage-guide {
+  margin-bottom: 12px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.usage-guide summary {
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  background: var(--card-bg);
+}
+
+.usage-guide summary:hover {
+  background: #f0f0f0;
+}
+
+.guide-content {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-color);
+  line-height: 1.5;
+  border-top: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.guide-content p {
+  margin-bottom: 4px;
+}
+
+/* Unified Source Section */
+#source-status-card {
+  padding: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-content {
+  width: 100%;
+}
+
+.status-content.hidden {
+  display: none !important;
+}
+
+#status-disconnected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--subtext-color);
+}
+
+.status-icon {
+  font-size: 24px;
+}
+
+.status-message {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-message strong {
+  color: var(--text-color);
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+
+.status-message span {
+  font-size: 12px;
+}
+
+/* Connected State */
+.profile-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.profile-text {
+  display: flex;
+  flex-direction: column;
+}
+
+#profile-section {
+  /* Legacy overridden */
+  display: none !important;
+}

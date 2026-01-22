@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Threads Sweeper",
+  "version": "1.0.0",
+  "description": "Threads 유해 계정 일괄 차단 도구",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "cookies",
+    "tabs",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://www.threads.com/*",
+    "https://www.threads.net/*"
+  ],
+  "action": {
+    "default_icon": {
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/popup/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.threads.com/*",
+        "https://www.threads.net/*"
+      ],
+      "js": [
+        "src/content/content.js"
+      ],
+      "css": [
+        "src/content/content.css"
+      ]
+    }
+  ],
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
