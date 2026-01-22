@@ -590,7 +590,7 @@ async function performBlockAction(username) {
   const activeSleep = (min, max) => sleep(getRandomInt(min, max));
 
   // Verification timeout for checking Unblock button
-  const UNBLOCK_VERIFICATION_TIMEOUT = 5000;
+  const UNBLOCK_VERIFICATION_TIMEOUT = 12000;
 
   // --- Helpers ---
 
@@ -742,7 +742,7 @@ async function performBlockAction(username) {
   const findUnblockButton = () => {
     // Strategy: Find any visible element that CONTAINS "Unblock" text.
     // We broaden the search to catch cases where role="button" might be missing or nested.
-    const unblockTexts = ['차단 해제', '차단해제', 'Unblock'];
+    const unblockTexts = ['차단 해제', '차단해제', '차단됨', 'Unblock', 'Blocked'];
 
     // Broad candidate list: Buttons, generic divs/spans that might be buttons
     const candidates = document.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
@@ -1014,5 +1014,4 @@ async function performBlockAction(username) {
     window.fetch = originalFetch;
   }
 }
-
 
