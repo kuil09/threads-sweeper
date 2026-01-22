@@ -1072,27 +1072,16 @@ async function performBlockAction(username) {
 async function verifyBlockedStatus(username, unblockTextVariants = []) {
   console.log(`[Block Script] Verifying block status after refresh for ${username}`);
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  const waitFor = async (finder, timeout = 8000, name = 'Element') => {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const el = finder();
-      if (el) return el;
-      await sleep(400);
-    }
-    throw new Error(`${name} not found after ${timeout}ms`);
-  };
-
   const root = document.querySelector('main, [role="main"]') || document.body;
   const findUnblockButton = () => {
-    const candidates = root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span[dir="auto"], div[dir="auto"]');
+    const candidates = root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span, div');
 
     for (const el of candidates) {
       if (el.childElementCount > 3) continue;
       const text = el.innerText?.trim() || '';
       if (!text) continue;
-      const includesMatch = unblockTextVariants.some(t => text.includes(t));
-      if (includesMatch && text.length < 20) {
+      const matchesText = unblockTextVariants.some(t => text === t || text === `${t}...` || text.includes(t));
+      if (matchesText && text.length < 20) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           return el;
@@ -1103,7 +1092,20 @@ async function verifyBlockedStatus(username, unblockTextVariants = []) {
   };
 
   try {
-    await waitFor(findUnblockButton, 8000, 'Unblock button verification');
+    await new Promise((resolve, reject) => {
+      const start = Date.now();
+      const timer = setInterval(() => {
+        if (findUnblockButton()) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (Date.now() - start > 8000) {
+          clearInterval(timer);
+          reject(new Error('Unblock button verification not found after 8000ms'));
+        }
+      }, 400);
+    });
     console.log('[Block Script] VERIFIED: Unblock button found after refresh.');
     return { success: true, error: null };
   } catch (error) {
