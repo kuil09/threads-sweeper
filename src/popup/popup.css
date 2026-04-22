@@ -270,12 +270,35 @@ header h1 {
   color: var(--danger-color);
 }
 
+.user-item.report-failed {
+  color: #8a5a00;
+}
+
 /* Controls */
 .action-controls {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
   /* Increased vertical spacing */
+}
+
+.report-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 34px;
+  color: var(--text-color);
+  font-size: 12px;
+  user-select: none;
+}
+
+.report-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--danger-color);
 }
 
 .action-controls:last-of-type {
@@ -283,6 +306,7 @@ header h1 {
 }
 
 .action-controls button {
+  flex: 1;
   margin: 0;
 }
 

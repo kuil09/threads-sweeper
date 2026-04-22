@@ -22,10 +22,10 @@
       <div class="guide-content">
         <p>1. <strong>수집:</strong> 상대방 프로필 페이지에서 팔로워 목록을 직접 연 뒤, [수집 시작]을 누르고 팔로워 목록을 스크롤합니다.</p>
         <p>2. <strong>대기열:</strong> 스크롤할수록 화면에 보이는 팔로워가 아래 차단 대기열에 자동으로 추가됩니다.</p>
-        <p>3. <strong>차단:</strong> 대기열을 확인한 후 [차단 시작]을 눌러 백그라운드에서 차단을 실행합니다.</p>
-        <p>4. <strong>수동:</strong> 여러 개의 계정을 공백 또는 쉼표(,)로 구분해 한 번에 입력한 뒤 [추가]를 누릅니다.</p>
-        <p>5. <strong>동시 차단:</strong> 필요하다면 “동시 차단” 드롭다운에서 한 번에 처리할 계정 수(최대 10개)를 선택해 속도를 조절할 수 있습니다.</p>
-        <p class="warning">⚠️ 차단 중에는 브라우저를 끄지 마세요.</p>
+        <p>3. <strong>차단:</strong> 수집된 팔로워 대기열을 확인한 후 [차단 시작]을 눌러 백그라운드에서 처리합니다. 신고도 함께 하려면 옵션을 켭니다.</p>
+        <p>4. <strong>수동:</strong> 팔로워 수집 없이 직접 처리할 계정은 공백 또는 쉼표(,)로 구분해 입력한 뒤 [추가]를 누릅니다.</p>
+        <p>5. <strong>동시 작업:</strong> 필요하다면 “동시 작업” 드롭다운에서 한 번에 처리할 계정 수(최대 10개)를 선택해 속도를 조절할 수 있습니다.</p>
+        <p class="warning">⚠️ 처리 중에는 브라우저를 끄지 마세요.</p>
       </div>
     </details>
 
@@ -53,7 +53,7 @@
             </button>
           </div>
           <p class="responsibility-text" style="font-size: 11px; margin-top: 8px; color: #888;">
-            이 프로필에서 팔로워 목록을 먼저 연 뒤, [수집 시작]을 누르고 목록을 스크롤하면 화면에 보이는 팔로워들이 아래 차단 대기열에 추가됩니다.
+            이 프로필은 수집 소스입니다. 팔로워 목록을 먼저 연 뒤 [수집 시작]을 누르고 스크롤하면, 화면에 보이는 팔로워들이 아래 차단 대기열에 추가됩니다.
           </p>
         </div>
       </div>
@@ -64,7 +64,7 @@
 
       <!-- Manual Add -->
       <div class="input-group">
-        <input type="text" id="manual-add-input" placeholder="차단할 계정 여러 개 입력 (@제외, 공백/쉼표 구분)">
+        <input type="text" id="manual-add-input" placeholder="수동으로 처리할 계정 입력 (@제외, 공백/쉼표 구분)">
         <button id="btn-manual-add" class="btn btn-secondary">추가</button>
       </div>
 
@@ -74,7 +74,7 @@
         <h3 style="margin: 0; font-size: 14px;">차단 대기열 (<span id="progress-current">0</span>/<span
             id="progress-total">0</span>)</h3>
         <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666;">
-          <label for="concurrency-select">동시 차단</label>
+          <label for="concurrency-select">동시 작업</label>
           <select id="concurrency-select" style="font-size: 11px; padding: 2px 4px;">
             <option value="1" selected>1개</option>
             <option value="2">2개</option>
@@ -92,7 +92,7 @@
       </div>
 
       <p style="margin: 4px 0 8px 0; font-size: 11px; color: #888;">
-        팔로워 목록을 연 뒤 아래로 스크롤하면 화면에 보이는 계정이 이 목록에 자동으로 추가됩니다.
+        이 목록의 계정이 차단 대상입니다. 팔로워 수집으로 추가하거나, 필요한 경우 수동으로 추가할 수 있습니다.
       </p>
 
       <div id="user-list-container">
@@ -104,6 +104,10 @@
       <!-- Action Controls -->
       <!-- Blocking Controls -->
       <div id="blocking-controls" class="action-controls">
+        <label class="report-option" for="report-before-block-checkbox">
+          <input type="checkbox" id="report-before-block-checkbox">
+          <span>신고도 함께 하기</span>
+        </label>
         <button id="btn-blocking-toggle" class="btn btn-danger">차단 시작</button>
       </div>
 

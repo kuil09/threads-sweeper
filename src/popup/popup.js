@@ -48,7 +48,8 @@ const DOM_IDS = {
   BTN_EXPORT_CSV: 'btn-export-csv',
 
   // Concurrency control
-  CONCURRENCY_SELECT: 'concurrency-select'
+  CONCURRENCY_SELECT: 'concurrency-select',
+  REPORT_BEFORE_BLOCK_CHECKBOX: 'report-before-block-checkbox'
 };
 
 // ============================================
@@ -66,7 +67,7 @@ class StateManager {
   constructor(onStateChange) {
     this.onStateChange = onStateChange;
     this._phase = AppPhase.IDLE;
-    this._users = new Map();  // username -> { source, status, timestamp }
+    this._users = new Map();  // username -> { source, status, reportStatus, blockStatus, timestamp }
   }
 
   get phase() { return this._phase; }
@@ -83,7 +84,9 @@ class StateManager {
     if (this._users.has(username)) return false;
     this._users.set(username, {
       source,
-      status: 'pending',  // pending | blocked | failed
+      status: 'pending',  // pending | reported | blocked | failed
+      reportStatus: 'pending', // pending | reported | failed | skipped
+      blockStatus: 'pending',  // pending | blocked | failed
       timestamp: new Date().toISOString()
     });
     this.onStateChange('userAdded', { username, source });
@@ -99,6 +102,32 @@ class StateManager {
     }
   }
 
+  // Update report/block result independently while keeping block success as final success.
+  updateUserResult(username, result) {
+    const user = this._users.get(username);
+    if (!user) return;
+
+    if (result.reportSkipped) {
+      user.reportStatus = 'skipped';
+      user.reportError = null;
+    } else {
+      user.reportStatus = result.reportSuccess ? 'reported' : 'failed';
+      user.reportError = result.reportError || null;
+    }
+    user.blockStatus = result.blockSuccess ? 'blocked' : 'failed';
+    user.blockError = result.blockError || result.error || null;
+
+    if (user.blockStatus === 'blocked') {
+      user.status = 'blocked';
+    } else if (user.reportStatus === 'reported') {
+      user.status = 'reported';
+    } else {
+      user.status = 'failed';
+    }
+
+    this.onStateChange('userUpdated', { username, status: user.status });
+  }
+
   // 전체 초기화
   reset() {
     this._users.clear();
@@ -108,13 +137,14 @@ class StateManager {
 
   // 통계
   get counts() {
-    let pending = 0, blocked = 0, failed = 0;
+    let pending = 0, reported = 0, blocked = 0, failed = 0;
     for (const u of this._users.values()) {
-      if (u.status === 'pending') pending++;
-      else if (u.status === 'blocked') blocked++;
-      else if (u.status === 'failed') failed++;
+      if (u.blockStatus === 'pending') pending++;
+      if (u.reportStatus === 'reported') reported++;
+      if (u.blockStatus === 'blocked') blocked++;
+      else if (u.blockStatus === 'failed') failed++;
     }
-    return { total: this._users.size, pending, blocked, failed };
+    return { total: this._users.size, pending, reported, blocked, failed };
   }
 
   get pendingUsers() {
@@ -172,11 +202,13 @@ class PopupController {
     const btnCollection = this.btnCollectionToggle;
     const btnBlocking = this.btnBlockingToggle;
     const blockingControls = this.blockingControls;
+    const startLabel = this.getBlockingStartLabel();
+    const stopLabel = this.shouldReportBeforeBlock() ? '신고/차단 중지' : '차단 중지';
 
     switch (phase) {
       case AppPhase.IDLE:
         if (btnCollection) btnCollection.textContent = '📥 수집 시작';
-        if (btnBlocking) btnBlocking.textContent = '차단 시작';
+        if (btnBlocking) btnBlocking.textContent = startLabel;
         if (blockingControls) blockingControls.classList.add('hidden');
         break;
       case AppPhase.COLLECTING:
@@ -185,31 +217,39 @@ class PopupController {
         break;
       case AppPhase.READY:
         if (btnCollection) btnCollection.textContent = '📥 수집 시작';
-        if (btnBlocking) btnBlocking.textContent = '차단 시작';
+        if (btnBlocking) btnBlocking.textContent = startLabel;
         if (blockingControls) blockingControls.classList.remove('hidden');
         break;
       case AppPhase.BLOCKING:
-        if (btnBlocking) btnBlocking.textContent = '차단 중지';
+        if (btnBlocking) btnBlocking.textContent = stopLabel;
         if (blockingControls) blockingControls.classList.remove('hidden');
         break;
       case AppPhase.PAUSED:
-        if (btnBlocking) btnBlocking.textContent = '차단 시작';
+        if (btnBlocking) btnBlocking.textContent = startLabel;
         if (blockingControls) blockingControls.classList.remove('hidden');
         break;
     }
   }
 
+  shouldReportBeforeBlock() {
+    return !!this.reportBeforeBlockCheckbox?.checked;
+  }
+
+  getBlockingStartLabel() {
+    return this.shouldReportBeforeBlock() ? '신고 후 차단 시작' : '차단 시작';
+  }
+
   // Update counters from state
   updateCounters() {
-    const { total, blocked, pending } = this.stateManager.counts;
+    const { total, blocked, failed } = this.stateManager.counts;
     const phase = this.stateManager.phase;
 
     if (phase === AppPhase.COLLECTING) {
       if (this.progressCurrent) this.progressCurrent.textContent = '0';
       if (this.progressTotal) this.progressTotal.textContent = String(total);
     } else {
-      // During blocking: show (processed / total)
-      if (this.progressCurrent) this.progressCurrent.textContent = String(blocked);
+      // During report/block: show processed users / total users.
+      if (this.progressCurrent) this.progressCurrent.textContent = String(blocked + failed);
       if (this.progressTotal) this.progressTotal.textContent = String(total);
     }
   }
@@ -239,16 +279,22 @@ class PopupController {
     const item = document.getElementById(`user-${username}`);
     if (!item) return;
 
-    // Prevent duplicate status append
-    if (item.classList.contains('blocked') || item.classList.contains('failed')) return;
+    const user = this.stateManager.allUsers.find(row => row.username === username);
+    if (!user) return;
 
-    if (status === 'blocked') {
-      item.classList.add('blocked');
-      item.textContent += ' (차단 완료)';
-    } else if (status === 'failed') {
-      item.classList.add('failed');
-      item.textContent += ' (실패)';
-    }
+    item.classList.toggle('blocked', user.blockStatus === 'blocked');
+    item.classList.toggle('failed', user.blockStatus === 'failed');
+    item.classList.toggle('report-failed', user.reportStatus === 'failed' && user.blockStatus !== 'failed');
+
+    const labels = [];
+    if (user.reportStatus === 'reported') labels.push('신고 완료');
+    if (user.reportStatus === 'failed') labels.push('신고 실패');
+    if (user.blockStatus === 'blocked') labels.push('차단 완료');
+    if (user.blockStatus === 'failed') labels.push('차단 실패');
+
+    item.textContent = labels.length > 0
+      ? `@${username} (${labels.join(' / ')})`
+      : `@${username}`;
   }
 
   // Render empty state
@@ -283,6 +329,7 @@ class PopupController {
     this.manualAddInput = document.getElementById(DOM_IDS.MANUAL_ADD_INPUT);
     this.btnManualAdd = document.getElementById(DOM_IDS.BTN_MANUAL_ADD);
     this.concurrencySelect = document.getElementById(DOM_IDS.CONCURRENCY_SELECT);
+    this.reportBeforeBlockCheckbox = document.getElementById(DOM_IDS.REPORT_BEFORE_BLOCK_CHECKBOX);
 
     // Simplified Controls
     this.blockingControls = document.getElementById('blocking-controls');
@@ -325,6 +372,10 @@ class PopupController {
       this.btnExportCsv.addEventListener('click', () => this.downloadCSV());
     }
 
+    if (this.reportBeforeBlockCheckbox) {
+      this.reportBeforeBlockCheckbox.addEventListener('change', () => this.updateUIForPhase(this.stateManager.phase));
+    }
+
     // Concurrency control
     if (this.concurrencySelect) {
       this.concurrencySelect.addEventListener('change', async () => {
@@ -352,7 +403,7 @@ class PopupController {
           this.addUserToList(message.username);
           break;
         case MESSAGE_TYPES.BLOCK_RESULT:
-          this.markUserBlocked(message.username, message.success);
+          this.markUserProcessed(message.username, message);
           break;
         case MESSAGE_TYPES.RATE_LIMIT_DETECTED:
           this.onRateLimitDetected(message.error, message.code);
@@ -549,7 +600,8 @@ class PopupController {
 
       await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.START_BLOCKING,
-        users: pendingUsers
+        users: pendingUsers,
+        reportBeforeBlock: this.shouldReportBeforeBlock()
       });
 
       this.stateManager.setPhase(AppPhase.BLOCKING);
@@ -620,11 +672,11 @@ class PopupController {
   onRateLimitDetected(error, code) {
     console.error('[Popup] Rate limit detected:', error, code);
 
-    // Pause blocking on rate limit
+    // Pause processing on rate limit
     this.stateManager.setPhase(AppPhase.PAUSED);
 
     // Alert user about rate limit
-    const errorMessage = `Rate Limit 감지: 차단 요청이 너무 빈번합니다.\n\n에러 메시지: ${error}\n에러 코드: ${code}\n\n잠시 후 다시 시도해주세요.`;
+    const errorMessage = `Rate Limit 감지: 요청이 너무 빈번합니다.\n\n에러 메시지: ${error}\n에러 코드: ${code}\n\n잠시 후 다시 시도해주세요.`;
     alert(errorMessage);
   }
 
@@ -639,9 +691,8 @@ class PopupController {
     }
   }
 
-  markUserBlocked(username, success) {
-    const status = success ? 'blocked' : 'failed';
-    this.stateManager.updateUserStatus(username, status);
+  markUserProcessed(username, result) {
+    this.stateManager.updateUserResult(username, result);
   }
 
   // --- CSV Export ---
@@ -653,16 +704,16 @@ class PopupController {
     }
 
     const bom = '\uFEFF';
-    let csvContent = bom + 'Username,Status,Timestamp\n';
+    let csvContent = bom + 'Username,ReportStatus,BlockStatus,Timestamp\n';
     users.forEach(row => {
-      csvContent += `${row.username},${row.status},${row.timestamp}\n`;
+      csvContent += `${row.username},${row.reportStatus},${row.blockStatus},${row.timestamp}\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `threads_block_list_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `threads_report_block_list_${new Date().toISOString().slice(0, 10)}.csv`);
     link.setAttribute('target', '_blank');
     document.body.appendChild(link);
     link.click();

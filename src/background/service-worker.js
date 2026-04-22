@@ -60,6 +60,9 @@ chrome.windows.onRemoved.addListener((windowId) => {
 async function handleMessage(message, sender, sendResponse) {
   switch (message.type) {
     case MESSAGE_TYPES.QUEUE_BLOCK_USERS:
+      if (Object.prototype.hasOwnProperty.call(message, 'reportBeforeBlock')) {
+        reportBeforeBlock = !!message.reportBeforeBlock;
+      }
       // Fix: Pass autoStart from message (default to true if undefined)
       // Fix: Handle null tab (popup)
       addToBlockQueue(message.users, sender.tab?.id || null, sender.tab?.url || null, message.autoStart);
@@ -86,6 +89,7 @@ async function handleMessage(message, sender, sendResponse) {
       break;
 
     case MESSAGE_TYPES.START_BLOCKING:
+      reportBeforeBlock = !!message.reportBeforeBlock;
       if (message.users && message.users.length > 0) {
         // Re-populate queue if provided (persistence fix)
         // Fix: Handle null tab (popup messages don't have sender.tab)
@@ -185,6 +189,7 @@ let mainPageUrl = 'https://www.threads.net/'; // Dynamic base URL
 
 // Parallel worker pool configuration
 let maxParallelWorkers = 1; // Updated via SET_MAX_PARALLEL (1~10)
+let reportBeforeBlock = false;
 const VERIFY_REFRESH_MAX_ATTEMPTS = 3;
 const VERIFY_REFRESH_BASE_DELAY = 1500;
 const VERIFY_REFRESH_BACKOFF_MULTIPLIER = 2;
@@ -310,21 +315,43 @@ async function executeBlockJob(index, worker, username) {
 
     if (!result.success && result.error && result.error.includes('showing error page')) {
       console.warn(`[Queue] Error Page detected for ${username}. Skipping...`);
-      notifyProgress(username, false, '페이지 로드 실패 (404/Network)');
+      notifyProgress(username, {
+        success: false,
+        error: '페이지 로드 실패 (404/Network)',
+        reportSuccess: false,
+        reportSkipped: !reportBeforeBlock,
+        reportError: reportBeforeBlock ? 'Profile page failed to load' : null,
+        blockSuccess: false,
+        blockError: '페이지 로드 실패 (404/Network)'
+      });
     } else {
       let finalResult = result;
       if (!result.success && result.verificationFailed) {
         const refreshResult = await refreshAndVerifyBlock(worker, username);
         finalResult = refreshResult.success
-          ? { success: true, error: null }
-          : { success: false, error: refreshResult.error || result.error };
+          ? { ...result, success: true, error: null, blockSuccess: true, blockError: null }
+          : {
+            ...result,
+            success: false,
+            error: refreshResult.error || result.error,
+            blockSuccess: false,
+            blockError: refreshResult.error || result.blockError || result.error
+          };
       }
       console.log(`[Queue] Job finished for ${username}:`, finalResult);
-      notifyProgress(username, finalResult.success, finalResult.error);
+      notifyProgress(username, finalResult);
     }
   } catch (error) {
     console.error(`[Queue] Critical error processing ${username} on worker #${index + 1}:`, error);
-    notifyProgress(username, false, error.message);
+    notifyProgress(username, {
+      success: false,
+      error: error.message,
+      reportSuccess: false,
+      reportSkipped: !reportBeforeBlock,
+      reportError: reportBeforeBlock ? 'Critical worker error' : null,
+      blockSuccess: false,
+      blockError: error.message
+    });
   } finally {
     worker.busy = false;
     worker.currentUser = null;
@@ -540,8 +567,8 @@ function runBlockJob(worker, username) {
       try {
         const [scriptResult] = await chrome.scripting.executeScript({
           target: { tabId: tabId },
-          func: performBlockAction,
-          args: [username, UNBLOCK_TEXT_VARIANTS]
+          func: performReportThenBlockAction,
+          args: [username, UNBLOCK_TEXT_VARIANTS, { reportBeforeBlock }]
         });
 
         // executeScript returns the function's return value in result property
@@ -624,23 +651,33 @@ function waitForTabLoad(tabId) {
   });
 }
 
-function notifyProgress(username, success, error) {
+function notifyProgress(username, result) {
+  const normalized = typeof result === 'object' && result
+    ? result
+    : { success: !!result, error: null };
+
   // Notify Popup
   chrome.runtime.sendMessage({
     type: MESSAGE_TYPES.BLOCK_RESULT,
     username,
-    success,
-    error
+    success: !!normalized.success,
+    error: normalized.error || normalized.blockError || null,
+    reportSuccess: !!normalized.reportSuccess,
+    reportSkipped: !!normalized.reportSkipped,
+    reportError: normalized.reportError || null,
+    blockSuccess: normalized.blockSuccess ?? !!normalized.success,
+    blockError: normalized.blockError || normalized.error || null
   }).catch(() => { });
 }
 
 // This function is injected into the page
-async function performBlockAction(username, unblockTextVariants = []) {
-  console.log(`[Block Script] Started for ${username}`);
+async function performReportThenBlockAction(username, unblockTextVariants = [], options = {}) {
+  console.log(`[Report+Block Script] Started for ${username}`);
 
   const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const activeSleep = (min, max) => sleep(getRandomInt(min, max));
+  const shouldReportBeforeBlock = !!options.reportBeforeBlock;
 
   // Verification timeout for checking Unblock button
   const UNBLOCK_VERIFICATION_TIMEOUT = 12000;
@@ -914,12 +951,186 @@ async function performBlockAction(username, unblockTextVariants = []) {
     return null;
   };
 
+  const getVisibleText = (el) => (el?.innerText || el?.textContent || '').trim().replace(/\s+/g, ' ');
+
+  const findVisibleTextAction = (labels, options = {}) => {
+    const {
+      root = document.body,
+      excludeLabels = [],
+      maxLength = 80
+    } = options;
+    const normalizedLabels = labels.map(label => label.toLowerCase());
+    const normalizedExcludes = excludeLabels.map(label => label.toLowerCase());
+    const candidates = Array.from(root.querySelectorAll('div[role="button"], button, div[role="menuitem"], span[dir="auto"], div[dir="auto"]'));
+
+    for (const el of candidates) {
+      const text = getVisibleText(el);
+      if (!text || text.length > maxLength) continue;
+
+      const normalizedText = text.toLowerCase();
+      if (normalizedExcludes.some(label => normalizedText.includes(label))) continue;
+      if (!normalizedLabels.some(label => normalizedText === label || normalizedText.includes(label))) continue;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
+      return el.closest('div[role="button"], button, div[role="menuitem"]') || el;
+    }
+
+    return null;
+  };
+
+  const findReportButton = () => findVisibleTextAction(
+    ['Report', 'Report profile', 'Report account', '신고하기', '신고', '프로필 신고'],
+    {
+      excludeLabels: ['Block', 'Unblock', 'Blocked', '차단', '차단 해제', '차단해제'],
+      maxLength: 60
+    }
+  );
+
+  const findAccountReportButton = () => findVisibleTextAction(
+    ['Report account', 'Account report', '계정 신고'],
+    { maxLength: 70 }
+  );
+
+  const findDisallowedContentButton = () => findVisibleTextAction(
+    [
+      'Posts content that should not be on Threads',
+      'Posts content that is not allowed on Threads',
+      'Not allowed on Threads',
+      'Threads에 허용되지 않는 콘텐츠를 게시합니다',
+      '허용되지 않는 콘텐츠'
+    ],
+    { maxLength: 120 }
+  );
+
+  const findViolenceHateAbuseButton = () => findVisibleTextAction(
+    [
+      'Violence, hate or abuse',
+      'Violence, hate, or abuse',
+      '폭력, 혐오 또는 학대'
+    ],
+    { maxLength: 90 }
+  );
+
+  const findHateSpeechReasonButton = () => findVisibleTextAction(
+    [
+      'Hate speech or symbols',
+      'Hate speech',
+      '혐오 발언 또는 상징',
+      '혐오 발언'
+    ],
+    { maxLength: 90 }
+  );
+
+  const findReportSubmitButton = () => {
+    const dialogs = document.querySelectorAll('[role="dialog"]');
+    const root = dialogs.length > 0 ? dialogs[dialogs.length - 1] : document.body;
+    return findVisibleTextAction(
+      ['Submit', 'Submit report', 'Send', 'Done', 'Next', 'Continue', '제출', '신고 제출', '보내기', '완료', '다음', '계속'],
+      { root, excludeLabels: ['Cancel', '취소'], maxLength: 60 }
+    );
+  };
+
+  const findDismissButton = () => findVisibleTextAction(
+    ['Close', 'Cancel', 'Done', '닫기', '취소', '완료'],
+    { maxLength: 50 }
+  );
+
+  const dismissOpenDialog = async () => {
+    const dismissButton = findDismissButton();
+    if (dismissButton) {
+      dismissButton.click();
+      await activeSleep(500, 1000);
+      return;
+    }
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true
+    }));
+    await activeSleep(500, 1000);
+  };
+
+  const performReportFlow = async () => {
+    const clickReportStep = async (finder, timeout, name) => {
+      const button = await waitFor(finder, timeout, name);
+      const text = getVisibleText(button);
+      console.log(`[Report Script] Clicking ${name}: "${text}"`);
+      button.click();
+      await activeSleep(1000, 1800);
+      if (rateLimitDetected) {
+        return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+      }
+      return { success: true, text };
+    };
+
+    console.log('[Report Script] Looking for menu button...');
+    const menuBtn = await waitFor(findMenuButton, 10000, 'Menu button for report');
+    menuBtn.click();
+    await activeSleep(1200, 2000);
+
+    const steps = [
+      [findReportButton, 5000, 'Report button'],
+      [findAccountReportButton, 5000, 'Account report button'],
+      [findDisallowedContentButton, 7000, 'Disallowed Threads content button'],
+      [findViolenceHateAbuseButton, 7000, 'Violence, hate or abuse button'],
+      [findHateSpeechReasonButton, 7000, 'Hate speech or symbols button']
+    ];
+
+    for (const [finder, timeout, name] of steps) {
+      const stepResult = await clickReportStep(finder, timeout, name);
+      if (stepResult.isRateLimited) return stepResult;
+    }
+
+    for (let i = 0; i < 4; i++) {
+      if (rateLimitDetected) {
+        return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+      }
+
+      const submitBtn = findReportSubmitButton();
+      if (!submitBtn) break;
+
+      const text = getVisibleText(submitBtn);
+      console.log(`[Report Script] Clicking report flow button: "${text}"`);
+      submitBtn.click();
+      await activeSleep(1000, 1800);
+
+      const dialogGone = !document.querySelector('[role="dialog"]');
+      if (dialogGone || text === 'Done' || text === '완료') {
+        break;
+      }
+    }
+
+    const completed =
+      !document.querySelector('[role="dialog"]') ||
+      !!findVisibleTextAction(['신고 접수됨', 'Report submitted', '검토 대기 중', 'Thanks for your report'], { maxLength: 120 });
+
+    if (!completed) {
+      await dismissOpenDialog();
+      return { success: false, error: 'Report completion screen not found' };
+    }
+
+    if (document.querySelector('[role="dialog"]')) {
+      await dismissOpenDialog();
+    }
+
+    console.log('[Report Script] Report flow completed or reached completion screen.');
+    return { success: true, error: null };
+  };
+
   // --- Rate Limit Detection ---
 
   const originalFetch = window.fetch;
   let rateLimitDetected = false;
   let rateLimitError = null;
   let rateLimitCode = null;
+  let reportResult = shouldReportBeforeBlock
+    ? { success: false, error: 'Report not attempted', skipped: false }
+    : { success: false, error: null, skipped: true };
 
   try {
     // Intercept fetch to monitor GraphQL responses
@@ -940,7 +1151,7 @@ async function performBlockAction(username, unblockTextVariants = []) {
               // Check for error code 1675004 or "rate limit" in message
               if (error.code === 1675004 ||
                 (error.message && error.message.toLowerCase().includes('rate limit'))) {
-                console.error('[Block Script] Rate limit detected:', error);
+                console.error('[Report+Block Script] Rate limit detected:', error);
                 rateLimitDetected = true;
                 rateLimitError = error.message || 'Rate limit exceeded';
                 rateLimitCode = error.code || 1675004;
@@ -959,19 +1170,54 @@ async function performBlockAction(username, unblockTextVariants = []) {
     // --- Execution ---
 
     const initialDelay = getRandomInt(1500, 3000);
-    console.log(`[Block Script] Waiting ${initialDelay}ms before starting...`);
+    console.log(`[Report+Block Script] Waiting ${initialDelay}ms before starting...`);
     await sleep(initialDelay);
 
     // Early check for rate limit detection
     if (rateLimitDetected) {
-      console.error('[Block Script] Rate limit detected before blocking, aborting.');
+      console.error('[Report+Block Script] Rate limit detected before reporting/blocking, aborting.');
       return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+    }
+
+    if (shouldReportBeforeBlock) {
+      try {
+        reportResult = await performReportFlow();
+      } catch (error) {
+        console.warn('[Report Script] Report flow failed. Blocking will continue.', error);
+        reportResult = { success: false, error: error.message, skipped: false };
+        await dismissOpenDialog();
+      }
+    } else {
+      console.log('[Report Script] Report flow skipped by user option.');
+    }
+
+    if (reportResult.isRateLimited || rateLimitDetected) {
+      console.error('[Report+Block Script] Rate limit detected during report flow.');
+      return {
+        success: false,
+        error: rateLimitError || reportResult.error,
+        isRateLimited: true,
+        code: rateLimitCode || reportResult.code,
+        reportSuccess: false,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error || rateLimitError,
+        blockSuccess: false,
+        blockError: 'Skipped because rate limit was detected'
+      };
     }
 
     // 1. Check for "Unblock" button immediately on profile
     if (findUnblockButton()) {
       console.log('[Block Script] User already blocked (Unblock button on header). Success.');
-      return { success: true, error: null };
+      return {
+        success: true,
+        error: null,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: true,
+        blockError: null
+      };
     }
 
     // 2. Open Menu
@@ -983,7 +1229,15 @@ async function performBlockAction(username, unblockTextVariants = []) {
     // 3. Check for "Unblock" button in menu (or profile if it appeared)
     if (findUnblockButton()) {
       console.log('[Block Script] User already blocked (Unblock option in menu/profile). Success.');
-      return { success: true, error: null };
+      return {
+        success: true,
+        error: null,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: true,
+        blockError: null
+      };
     }
 
     // 4. Look for Block option
@@ -997,7 +1251,15 @@ async function performBlockAction(username, unblockTextVariants = []) {
       try {
         await waitFor(findUnblockButton, UNBLOCK_VERIFICATION_TIMEOUT, 'Unblock button for verification');
         console.log('[Block Script] VERIFIED: Unblock button found. Already blocked. Success.');
-        return { success: true, error: null };
+        return {
+          success: true,
+          error: null,
+          reportSuccess: reportResult.success,
+          reportSkipped: !!reportResult.skipped,
+          reportError: reportResult.error,
+          blockSuccess: true,
+          blockError: null
+        };
       } catch (verifyError) {
         // Neither Block nor Unblock button found - actual error
         console.error('[Block Script] Neither Block nor Unblock button found. Cannot verify status.');
@@ -1011,7 +1273,17 @@ async function performBlockAction(username, unblockTextVariants = []) {
     // Check for rate limit after clicking block button
     if (rateLimitDetected) {
       console.error('[Block Script] Rate limit detected after clicking block button.');
-      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+      return {
+        success: false,
+        error: rateLimitError,
+        isRateLimited: true,
+        code: rateLimitCode,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: false,
+        blockError: rateLimitError
+      };
     }
 
     // 5. Confirm Block
@@ -1040,7 +1312,17 @@ async function performBlockAction(username, unblockTextVariants = []) {
     // Check for rate limit after confirmation
     if (rateLimitDetected) {
       console.error('[Block Script] Rate limit detected after confirmation.');
-      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+      return {
+        success: false,
+        error: rateLimitError,
+        isRateLimited: true,
+        code: rateLimitCode,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: false,
+        blockError: rateLimitError
+      };
     }
 
     // 7. Final Verification - Wait for Unblock button to appear
@@ -1048,11 +1330,28 @@ async function performBlockAction(username, unblockTextVariants = []) {
     try {
       await waitFor(findUnblockButton, UNBLOCK_VERIFICATION_TIMEOUT, 'Unblock button verification');
       console.log('[Block Script] VERIFIED: Unblock button found. Block Successful.');
-      return { success: true, error: null };
+      return {
+        success: true,
+        error: null,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: true,
+        blockError: null
+      };
     } catch (e) {
       // Unblock button not found after waiting - this is a failure
       console.error('[Block Script] VERIFICATION FAILED: Unblock button not found after block attempt.');
-      return { success: false, error: 'Verification failed: Unblock button not found after block attempt', verificationFailed: true };
+      return {
+        success: false,
+        error: 'Verification failed: Unblock button not found after block attempt',
+        verificationFailed: true,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: false,
+        blockError: 'Verification failed: Unblock button not found after block attempt'
+      };
     }
 
 
@@ -1061,9 +1360,27 @@ async function performBlockAction(username, unblockTextVariants = []) {
     console.error('[Block Script] Error:', error);
     // Check if rate limit was detected during error handling
     if (rateLimitDetected) {
-      return { success: false, error: rateLimitError, isRateLimited: true, code: rateLimitCode };
+      return {
+        success: false,
+        error: rateLimitError,
+        isRateLimited: true,
+        code: rateLimitCode,
+        reportSuccess: reportResult.success,
+        reportSkipped: !!reportResult.skipped,
+        reportError: reportResult.error,
+        blockSuccess: false,
+        blockError: rateLimitError
+      };
     }
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error.message,
+      reportSuccess: reportResult.success,
+      reportSkipped: !!reportResult.skipped,
+      reportError: reportResult.error,
+      blockSuccess: false,
+      blockError: error.message
+    };
   } finally {
     // Always restore original fetch
     window.fetch = originalFetch;

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Threads Sweeper",
   "version": "1.0.0",
-  "description": "Threads 유해 계정 일괄 차단 도구",
+  "description": "Bulk collect and block harmful Threads accounts, with optional reporting",
   "permissions": [
     "activeTab",
     "scripting",
